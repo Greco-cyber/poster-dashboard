@@ -5,72 +5,77 @@ const PosterEmployeeDashboard = () => {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [apiConfig, setApiConfig] = useState({
-    token: '',
-    account: '',
-    baseUrl: ''
-  });
-  const [isConfigured, setIsConfigured] = useState(false);
-  const [showManualConfig, setShowManualConfig] = useState(false);
 
-  // Проверяем конфигурацию при загрузке компонента
+  // Конфигурация API - ИЗМЕНИТЕ НА СВОИ ДАННЫЕ
+  const API_CONFIG = {
+    token: process.env.REACT_APP_POSTER_TOKEN, // Токен из Render
+    account: 'poka-net3', // Ваш аккаунт Poster
+  };
+
   useEffect(() => {
-    // Получаем переменные окружения
-    const envToken = process.env.REACT_APP_POSTER_TOKEN || window.REACT_APP_POSTER_TOKEN || '';
-    const envAccount = process.env.REACT_APP_POSTER_ACCOUNT || window.REACT_APP_POSTER_ACCOUNT || '';
-    const envBaseUrl = process.env.REACT_APP_POSTER_BASE_URL || window.REACT_APP_POSTER_BASE_URL || '';
-
-    console.log('Environment check:', {
-      hasToken: !!envToken,
-      hasAccount: !!envAccount,
-      hasBaseUrl: !!envBaseUrl
-    });
-
-    if (envToken && envAccount) {
-      setApiConfig({
-        token: envToken,
-        account: envAccount,
-        baseUrl: envBaseUrl
-      });
-      setIsConfigured(true);
-      fetchEmployeesWithConfig(envToken, envAccount, envBaseUrl);
-    } else {
-      setError('Переменные окружения не найдены. Настройте их в Render или введите вручную.');
-      setLoading(false);
-    }
+    fetchEmployees();
   }, []);
 
-  // Функция для получения данных сотрудников с параметрами
-  const fetchEmployeesWithConfig = async (token, account, baseUrl) => {
-    if (!token || !account) return;
+  // Функция для выполнения API запроса согласно документации
+  const makeAPIRequest = async (method, params = {}) => {
+    if (!API_CONFIG.token) {
+      throw new Error('Токен не найден');
+    }
+
+    // Формируем URL согласно документации Poster
+    const baseUrl = API_CONFIG.account ? 
+      `https://${API_CONFIG.account}.joinposter.com/api` : 
+      'https://joinposter.com/api';
     
+    // Добавляем токен и формат к параметрам
+    const allParams = new URLSearchParams({
+      token: API_CONFIG.token,
+      format: 'json',
+      ...params
+    });
+
+    const url = `${baseUrl}/${method}?${allParams.toString()}`;
+    
+    console.log('Making API request to:', url);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP Error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.error) {
+      throw new Error(`Poster API Error: ${data.error.message} (Code: ${data.error.code})`);
+    }
+
+    return data.response;
+  };
+
+  // Функция для получения данных сотрудников
+  const fetchEmployees = async () => {
     setLoading(true);
     setError(null);
     
     try {
-      const apiBaseUrl = baseUrl || `https://${account}.joinposter.com/api`;
-      
-      console.log('Making API call to:', apiBaseUrl);
-      
-      // Получаем список сотрудников
-      const employeesResponse = await fetch(`${apiBaseUrl}/access.getEmployees`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          token: token,
-        }),
+      console.log('API Config:', {
+        hasToken: !!API_CONFIG.token,
+        account: API_CONFIG.account
       });
       
-      if (!employeesResponse.ok) {
-        throw new Error(`HTTP Error: ${employeesResponse.status}`);
-      }
+      // Получаем список сотрудников согласно документации
+      const employeesData = await makeAPIRequest('access.getEmployees');
       
-      const employeesData = await employeesResponse.json();
+      console.log('Employees API response:', employeesData);
       
-      if (employeesData.error) {
-        throw new Error(employeesData.error);
+      if (!employeesData || !Array.isArray(employeesData)) {
+        throw new Error('Неверный формат ответа API');
       }
       
       // Получаем статистику продаж для каждого сотрудника
@@ -78,23 +83,17 @@ const PosterEmployeeDashboard = () => {
       const dateFrom = today.toISOString().split('T')[0];
       const dateTo = dateFrom;
       
+      console.log('Fetching stats for date:', dateFrom);
+      
       const employeesWithStats = await Promise.all(
-        employeesData.response.map(async (employee) => {
+        employeesData.map(async (employee) => {
           try {
-            const statsResponse = await fetch(`${apiBaseUrl}/dash.getTransactionStats`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                token: token,
-                dateFrom,
-                dateTo,
-                employee_id: employee.employee_id,
-              }),
+            // Используем правильный метод согласно документации
+            const statsData = await makeAPIRequest('dash.getTransactionStats', {
+              dateFrom,
+              dateTo,
+              employee_id: employee.employee_id,
             });
-            
-            const statsData = await statsResponse.json();
             
             let stats = {
               revenue: 0,
@@ -102,24 +101,23 @@ const PosterEmployeeDashboard = () => {
               averageCheck: 0
             };
             
-            if (statsData.response && !statsData.error) {
-              const data = statsData.response;
-              stats.revenue = data.revenue || 0;
-              stats.transactions = data.transactions || 0;
+            if (statsData) {
+              stats.revenue = parseFloat(statsData.revenue) || 0;
+              stats.transactions = parseInt(statsData.transactions) || 0;
               stats.averageCheck = stats.transactions > 0 ? stats.revenue / stats.transactions : 0;
             }
             
             return {
               ...employee,
               stats,
-              isOnShift: Math.random() > 0.3 // Увеличили вероятность для тестирования
+              isOnShift: Math.random() > 0.2 // 80% вероятность для демонстрации
             };
           } catch (err) {
             console.error(`Ошибка получения статистики для сотрудника ${employee.employee_name}:`, err);
             return {
               ...employee,
               stats: { revenue: 0, transactions: 0, averageCheck: 0 },
-              isOnShift: false
+              isOnShift: Math.random() > 0.5
             };
           }
         })
@@ -129,25 +127,13 @@ const PosterEmployeeDashboard = () => {
       const onShiftEmployees = employeesWithStats.filter(emp => emp.isOnShift);
       setEmployees(onShiftEmployees);
       
+      console.log(`Loaded ${onShiftEmployees.length} employees on shift`);
+      
     } catch (err) {
-      setError(`Ошибка подключения к API: ${err.message}`);
+      setError(err.message);
       console.error('Ошибка:', err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  // Функция для обновления данных
-  const fetchEmployees = () => {
-    fetchEmployeesWithConfig(apiConfig.token, apiConfig.account, apiConfig.baseUrl);
-  };
-
-  // Функция для ручной настройки
-  const handleManualConfig = () => {
-    if (apiConfig.token && apiConfig.account) {
-      setIsConfigured(true);
-      setShowManualConfig(false);
-      fetchEmployeesWithConfig(apiConfig.token, apiConfig.account, apiConfig.baseUrl);
     }
   };
 
@@ -155,90 +141,8 @@ const PosterEmployeeDashboard = () => {
     return new Intl.NumberFormat('uk-UA', {
       style: 'currency',
       currency: 'UAH',
-    }).format(amount / 100); // Предполагаем, что API возвращает копейки
+    }).format(amount / 100); // Предполагаем копейки
   };
-
-  if (!isConfigured && !error && !showManualConfig) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Инициализация приложения...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isConfigured && (error || showManualConfig)) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
-          <div className="text-center mb-6">
-            <Users className="w-12 h-12 text-blue-500 mx-auto mb-4" />
-            <h1 className="text-2xl font-bold text-gray-900">Настройка API</h1>
-            <p className="text-gray-600 mt-2">Введите данные для подключения к Poster</p>
-          </div>
-          
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
-              <p className="text-red-700 text-sm">{error}</p>
-            </div>
-          )}
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Название аккаунта *
-              </label>
-              <input
-                type="text"
-                value={apiConfig.account}
-                onChange={(e) => setApiConfig({...apiConfig, account: e.target.value})}
-                placeholder="your-account"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                API Token *
-              </label>
-              <input
-                type="password"
-                value={apiConfig.token}
-                onChange={(e) => setApiConfig({...apiConfig, token: e.target.value})}
-                placeholder="Введите ваш API токен"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Base URL (опционально)
-              </label>
-              <input
-                type="text"
-                value={apiConfig.baseUrl}
-                onChange={(e) => setApiConfig({...apiConfig, baseUrl: e.target.value})}
-                placeholder="https://your-account.joinposter.com/api"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            
-            <button
-              onClick={handleManualConfig}
-              disabled={!apiConfig.token || !apiConfig.account}
-              className="w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              Подключиться
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   if (loading) {
     return (
@@ -251,7 +155,7 @@ const PosterEmployeeDashboard = () => {
     );
   }
 
-  if (error && isConfigured) {
+  if (error) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg shadow-lg p-8 text-center max-w-md w-full">
@@ -260,24 +164,20 @@ const PosterEmployeeDashboard = () => {
           </div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">Ошибка подключения</h2>
           <p className="text-gray-600 mb-4">{error}</p>
-          <div className="flex space-x-2">
-            <button
-              onClick={fetchEmployees}
-              className="flex-1 bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors"
-            >
-              Повторить
-            </button>
-            <button
-              onClick={() => {
-                setIsConfigured(false);
-                setShowManualConfig(true);
-                setError(null);
-              }}
-              className="flex-1 bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600 transition-colors"
-            >
-              Настроить
-            </button>
+          <div className="bg-gray-50 rounded-lg p-4 text-left mb-4">
+            <h3 className="font-semibold text-gray-800 mb-2">Проверьте:</h3>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>• Переменная <code className="bg-gray-200 px-1 rounded">REACT_APP_POSTER_TOKEN</code> в Render</li>
+              <li>• Правильность названия аккаунта в коде</li>
+              <li>• Токен должен быть валидным (формат: account_id:hash)</li>
+            </ul>
           </div>
+          <button
+            onClick={fetchEmployees}
+            className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors"
+          >
+            Повторить
+          </button>
         </div>
       </div>
     );
