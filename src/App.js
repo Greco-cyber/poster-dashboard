@@ -3,59 +3,71 @@ import { Users, TrendingUp, Receipt, DollarSign } from 'lucide-react';
 
 const PosterEmployeeDashboard = () => {
   const [employees, setEmployees] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showTokenInput, setShowTokenInput] = useState(false);
+  const [manualToken, setManualToken] = useState('');
 
-  // Конфигурация API - ИЗМЕНИТЕ НА СВОИ ДАННЫЕ
-  const API_CONFIG = {
-    token: process.env.REACT_APP_POSTER_TOKEN, // Токен из Render
-    account: 'poka-net3', // Ваш аккаунт Poster
+  // Получаем токен как в рабочем боте
+  const getToken = () => {
+    return manualToken || process.env.REACT_APP_POSTER_TOKEN || "";
   };
 
   useEffect(() => {
-    fetchEmployees();
-  }, []);
+    const token = getToken();
+    if (!token) {
+      setShowTokenInput(true);
+      setError('Токен не найден. Введите токен или добавьте переменную REACT_APP_POSTER_TOKEN в Render.');
+    } else {
+      setShowTokenInput(false);
+      fetchEmployees();
+    }
+  }, [manualToken]);
 
-  // Функция для выполнения API запроса согласно документации
-  const makeAPIRequest = async (method, params = {}) => {
-    if (!API_CONFIG.token) {
+  // Функция для выполнения API запроса (как в рабочем боте)
+  const makeAPIRequest = async (path, params = {}) => {
+    const token = getToken();
+    if (!token) {
       throw new Error('Токен не найден');
     }
 
-    // Формируем URL согласно документации Poster
-    const baseUrl = API_CONFIG.account ? 
-      `https://${API_CONFIG.account}.joinposter.com/api` : 
-      'https://joinposter.com/api';
+    // Используем тот же формат URL что и в рабочем боте
+    const url = `https://joinposter.com/api/${path}`;
     
-    // Добавляем токен и формат к параметрам
+    // Добавляем токен к параметрам (как в боте)
     const allParams = new URLSearchParams({
-      token: API_CONFIG.token,
-      format: 'json',
+      token: token,
       ...params
     });
 
-    const url = `${baseUrl}/${method}?${allParams.toString()}`;
+    const fullUrl = `${url}?${allParams.toString()}`;
     
-    console.log('Making API request to:', url);
+    console.log('Making API request to:', fullUrl);
     
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    try {
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
-    if (!response.ok) {
-      throw new Error(`HTTP Error: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`HTTP Error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('API response for', path, ':', data);
+      
+      if (data.error) {
+        throw new Error(`Poster API Error: ${data.error.message || data.error}`);
+      }
+
+      return data.response || [];
+    } catch (err) {
+      console.error('API request failed:', err);
+      throw err;
     }
-
-    const data = await response.json();
-    
-    if (data.error) {
-      throw new Error(`Poster API Error: ${data.error.message} (Code: ${data.error.code})`);
-    }
-
-    return data.response;
   };
 
   // Функция для получения данных сотрудников
@@ -64,19 +76,16 @@ const PosterEmployeeDashboard = () => {
     setError(null);
     
     try {
-      console.log('API Config:', {
-        hasToken: !!API_CONFIG.token,
-        account: API_CONFIG.account
-      });
+      console.log('Fetching employees with token:', !!getToken());
       
-      // Получаем список сотрудников согласно документации
+      // Получаем список сотрудников (как в оригинальном коде)
       const employeesData = await makeAPIRequest('access.getEmployees');
       
-      console.log('Employees API response:', employeesData);
-      
       if (!employeesData || !Array.isArray(employeesData)) {
-        throw new Error('Неверный формат ответа API');
+        throw new Error('Неверный формат ответа API для сотрудников');
       }
+      
+      console.log('Employees data:', employeesData);
       
       // Получаем статистику продаж для каждого сотрудника
       const today = new Date();
@@ -88,7 +97,7 @@ const PosterEmployeeDashboard = () => {
       const employeesWithStats = await Promise.all(
         employeesData.map(async (employee) => {
           try {
-            // Используем правильный метод согласно документации
+            // Используем правильный метод API для статистики
             const statsData = await makeAPIRequest('dash.getTransactionStats', {
               dateFrom,
               dateTo,
@@ -101,7 +110,7 @@ const PosterEmployeeDashboard = () => {
               averageCheck: 0
             };
             
-            if (statsData) {
+            if (statsData && typeof statsData === 'object') {
               stats.revenue = parseFloat(statsData.revenue) || 0;
               stats.transactions = parseInt(statsData.transactions) || 0;
               stats.averageCheck = stats.transactions > 0 ? stats.revenue / stats.transactions : 0;
@@ -137,12 +146,66 @@ const PosterEmployeeDashboard = () => {
     }
   };
 
+  const handleTokenSubmit = () => {
+    if (manualToken.trim()) {
+      // Это вызовет useEffect
+    }
+  };
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('uk-UA', {
       style: 'currency',
       currency: 'UAH',
     }).format(amount / 100); // Предполагаем копейки
   };
+
+  // Экран ввода токена
+  if (showTokenInput) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
+          <div className="text-center mb-6">
+            <Users className="w-12 h-12 text-blue-500 mx-auto mb-4" />
+            <h1 className="text-2xl font-bold text-gray-900">Введите токен Poster</h1>
+            <p className="text-gray-600 mt-2">Формат: account_id:hash_code</p>
+          </div>
+          
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
+              <p className="text-red-700 text-sm">{error}</p>
+            </div>
+          )}
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Poster Token
+              </label>
+              <input
+                type="text"
+                value={manualToken}
+                onChange={(e) => setManualToken(e.target.value)}
+                placeholder="861052:02391570ff9af128e93c5a771055ba88"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            
+            <button
+              onClick={handleTokenSubmit}
+              disabled={!manualToken.trim()}
+              className="w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              Подключиться
+            </button>
+          </div>
+
+          <div className="mt-6 text-center text-sm text-gray-500">
+            Или добавьте <code className="bg-gray-100 px-1 rounded">REACT_APP_POSTER_TOKEN</code> в переменные Render
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -164,20 +227,20 @@ const PosterEmployeeDashboard = () => {
           </div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">Ошибка подключения</h2>
           <p className="text-gray-600 mb-4">{error}</p>
-          <div className="bg-gray-50 rounded-lg p-4 text-left mb-4">
-            <h3 className="font-semibold text-gray-800 mb-2">Проверьте:</h3>
-            <ul className="text-sm text-gray-600 space-y-1">
-              <li>• Переменная <code className="bg-gray-200 px-1 rounded">REACT_APP_POSTER_TOKEN</code> в Render</li>
-              <li>• Правильность названия аккаунта в коде</li>
-              <li>• Токен должен быть валидным (формат: account_id:hash)</li>
-            </ul>
+          <div className="flex space-x-2">
+            <button
+              onClick={fetchEmployees}
+              className="flex-1 bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors"
+            >
+              Повторить
+            </button>
+            <button
+              onClick={() => setShowTokenInput(true)}
+              className="flex-1 bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600 transition-colors"
+            >
+              Изменить токен
+            </button>
           </div>
-          <button
-            onClick={fetchEmployees}
-            className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors"
-          >
-            Повторить
-          </button>
         </div>
       </div>
     );
