@@ -5,46 +5,66 @@ const PosterEmployeeDashboard = () => {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [apiConfig] = useState({
-    token: process.env.REACT_APP_POSTER_TOKEN || '',
-    account: process.env.REACT_APP_POSTER_ACCOUNT || '',
-    baseUrl: process.env.REACT_APP_POSTER_BASE_URL || ''
+  const [apiConfig, setApiConfig] = useState({
+    token: '',
+    account: '',
+    baseUrl: ''
   });
   const [isConfigured, setIsConfigured] = useState(false);
+  const [showManualConfig, setShowManualConfig] = useState(false);
 
   // Проверяем конфигурацию при загрузке компонента
   useEffect(() => {
-    if (apiConfig.token && apiConfig.account) {
+    // Получаем переменные окружения
+    const envToken = process.env.REACT_APP_POSTER_TOKEN || window.REACT_APP_POSTER_TOKEN || '';
+    const envAccount = process.env.REACT_APP_POSTER_ACCOUNT || window.REACT_APP_POSTER_ACCOUNT || '';
+    const envBaseUrl = process.env.REACT_APP_POSTER_BASE_URL || window.REACT_APP_POSTER_BASE_URL || '';
+
+    console.log('Environment check:', {
+      hasToken: !!envToken,
+      hasAccount: !!envAccount,
+      hasBaseUrl: !!envBaseUrl
+    });
+
+    if (envToken && envAccount) {
+      setApiConfig({
+        token: envToken,
+        account: envAccount,
+        baseUrl: envBaseUrl
+      });
       setIsConfigured(true);
-      fetchEmployees();
+      fetchEmployeesWithConfig(envToken, envAccount, envBaseUrl);
     } else {
-      setError('Не настроены переменные окружения. Проверьте REACT_APP_POSTER_TOKEN и REACT_APP_POSTER_ACCOUNT в настройках Render.');
+      setError('Переменные окружения не найдены. Настройте их в Render или введите вручную.');
+      setLoading(false);
     }
   }, []);
 
-  // Функция для получения данных сотрудников
-  const fetchEmployees = async () => {
-    if (!apiConfig.token || !apiConfig.account) return;
+  // Функция для получения данных сотрудников с параметрами
+  const fetchEmployeesWithConfig = async (token, account, baseUrl) => {
+    if (!token || !account) return;
     
     setLoading(true);
     setError(null);
     
     try {
-      const baseUrl = apiConfig.baseUrl || `https://${apiConfig.account}.joinposter.com/api`;
+      const apiBaseUrl = baseUrl || `https://${account}.joinposter.com/api`;
+      
+      console.log('Making API call to:', apiBaseUrl);
       
       // Получаем список сотрудников
-      const employeesResponse = await fetch(`${baseUrl}/access.getEmployees`, {
+      const employeesResponse = await fetch(`${apiBaseUrl}/access.getEmployees`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          token: apiConfig.token,
+          token: token,
         }),
       });
       
       if (!employeesResponse.ok) {
-        throw new Error('Ошибка получения данных сотрудников');
+        throw new Error(`HTTP Error: ${employeesResponse.status}`);
       }
       
       const employeesData = await employeesResponse.json();
@@ -61,13 +81,13 @@ const PosterEmployeeDashboard = () => {
       const employeesWithStats = await Promise.all(
         employeesData.response.map(async (employee) => {
           try {
-            const statsResponse = await fetch(`${baseUrl}/dash.getTransactionStats`, {
+            const statsResponse = await fetch(`${apiBaseUrl}/dash.getTransactionStats`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                token: apiConfig.token,
+                token: token,
                 dateFrom,
                 dateTo,
                 employee_id: employee.employee_id,
@@ -92,7 +112,7 @@ const PosterEmployeeDashboard = () => {
             return {
               ...employee,
               stats,
-              isOnShift: Math.random() > 0.5 // Заглушка для определения смены
+              isOnShift: Math.random() > 0.3 // Увеличили вероятность для тестирования
             };
           } catch (err) {
             console.error(`Ошибка получения статистики для сотрудника ${employee.employee_name}:`, err);
@@ -110,10 +130,24 @@ const PosterEmployeeDashboard = () => {
       setEmployees(onShiftEmployees);
       
     } catch (err) {
-      setError(err.message);
+      setError(`Ошибка подключения к API: ${err.message}`);
       console.error('Ошибка:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Функция для обновления данных
+  const fetchEmployees = () => {
+    fetchEmployeesWithConfig(apiConfig.token, apiConfig.account, apiConfig.baseUrl);
+  };
+
+  // Функция для ручной настройки
+  const handleManualConfig = () => {
+    if (apiConfig.token && apiConfig.account) {
+      setIsConfigured(true);
+      setShowManualConfig(false);
+      fetchEmployeesWithConfig(apiConfig.token, apiConfig.account, apiConfig.baseUrl);
     }
   };
 
@@ -124,12 +158,83 @@ const PosterEmployeeDashboard = () => {
     }).format(amount / 100); // Предполагаем, что API возвращает копейки
   };
 
-  if (!isConfigured && !error) {
+  if (!isConfigured && !error && !showManualConfig) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto"></div>
           <p className="mt-4 text-gray-600">Инициализация приложения...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isConfigured && (error || showManualConfig)) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
+          <div className="text-center mb-6">
+            <Users className="w-12 h-12 text-blue-500 mx-auto mb-4" />
+            <h1 className="text-2xl font-bold text-gray-900">Настройка API</h1>
+            <p className="text-gray-600 mt-2">Введите данные для подключения к Poster</p>
+          </div>
+          
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
+              <p className="text-red-700 text-sm">{error}</p>
+            </div>
+          )}
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Название аккаунта *
+              </label>
+              <input
+                type="text"
+                value={apiConfig.account}
+                onChange={(e) => setApiConfig({...apiConfig, account: e.target.value})}
+                placeholder="your-account"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                API Token *
+              </label>
+              <input
+                type="password"
+                value={apiConfig.token}
+                onChange={(e) => setApiConfig({...apiConfig, token: e.target.value})}
+                placeholder="Введите ваш API токен"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Base URL (опционально)
+              </label>
+              <input
+                type="text"
+                value={apiConfig.baseUrl}
+                onChange={(e) => setApiConfig({...apiConfig, baseUrl: e.target.value})}
+                placeholder="https://your-account.joinposter.com/api"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            
+            <button
+              onClick={handleManualConfig}
+              disabled={!apiConfig.token || !apiConfig.account}
+              className="w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              Подключиться
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -146,29 +251,33 @@ const PosterEmployeeDashboard = () => {
     );
   }
 
-  if (error) {
+  if (error && isConfigured) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg shadow-lg p-8 text-center max-w-md w-full">
           <div className="text-red-500 mb-4">
             <Users className="w-16 h-16 mx-auto" />
           </div>
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Ошибка конфигурации</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Ошибка подключения</h2>
           <p className="text-gray-600 mb-4">{error}</p>
-          <div className="bg-gray-50 rounded-lg p-4 text-left">
-            <h3 className="font-semibold text-gray-800 mb-2">Необходимые переменные окружения:</h3>
-            <ul className="text-sm text-gray-600 space-y-1">
-              <li>• <code className="bg-gray-200 px-1 rounded">REACT_APP_POSTER_TOKEN</code></li>
-              <li>• <code className="bg-gray-200 px-1 rounded">REACT_APP_POSTER_ACCOUNT</code></li>
-              <li>• <code className="bg-gray-200 px-1 rounded">REACT_APP_POSTER_BASE_URL</code> (опционально)</li>
-            </ul>
+          <div className="flex space-x-2">
+            <button
+              onClick={fetchEmployees}
+              className="flex-1 bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors"
+            >
+              Повторить
+            </button>
+            <button
+              onClick={() => {
+                setIsConfigured(false);
+                setShowManualConfig(true);
+                setError(null);
+              }}
+              className="flex-1 bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600 transition-colors"
+            >
+              Настроить
+            </button>
           </div>
-          <button
-            onClick={() => window.location.reload()}
-            className="mt-4 bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors"
-          >
-            Перезагрузить
-          </button>
         </div>
       </div>
     );
