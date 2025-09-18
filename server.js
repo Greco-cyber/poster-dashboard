@@ -27,7 +27,7 @@ async function poster(method, params = {}) {
   return j;
 }
 
-// -------------------- БАЗОВИЙ ДАШБОРД ПО ОФІЦІАНТАХ --------------------
+// -------------------- базовый отчёт по официантам --------------------
 app.get("/api/waiters-sales", async (req, res) => {
   try {
     if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
@@ -40,16 +40,16 @@ app.get("/api/waiters-sales", async (req, res) => {
   }
 });
 
-// -------------------- КЕШ ПРОДУКТІВ (product_id -> category_id) --------------------
+// -------------------- КЭШ ПРОДУКТОВ (product_id -> category_id) --------------------
 let PRODUCT_MAP = new Map(); // product_id:number -> category_id:number
 let PRODUCT_CACHE_AT = 0;
-const PRODUCT_TTL_MS = 15 * 60 * 1000; // 15 хв
+const PRODUCT_TTL_MS = 15 * 60 * 1000; // 15 мин
 
 async function ensureProductsMap() {
   const now = Date.now();
   if (PRODUCT_MAP.size && now - PRODUCT_CACHE_AT < PRODUCT_TTL_MS) return;
 
-  const list = await poster("menu.getProducts"); // повертає всі товари з category_id
+  const list = await poster("menu.getProducts");
   const arr = Array.isArray(list?.response) ? list.response : [];
   const map = new Map();
   for (const p of arr) {
@@ -61,11 +61,10 @@ async function ensureProductsMap() {
   PRODUCT_CACHE_AT = now;
 }
 
-// -------------------- ДОПОМОЖНІ ПАРСЕРИ --------------------
+// -------------------- утилиты парсинга чеков --------------------
 const pickWaiterId   = (tr) => tr.user_id ?? tr.waiter_id ?? tr.cashier_id ?? tr.employee_id ?? null;
 const pickWaiterName = (tr) => tr.user_name ?? tr.waiter_name ?? tr.employee_name ?? tr.name ?? `ID?`;
 
-// можливі поля з позиціями
 function pickPositions(tr) {
   return (
     tr.receipt_positions ??
@@ -79,22 +78,13 @@ function pickPositions(tr) {
   ) || [];
 }
 
-// «сплющуємо» модифікатори, інгредієнти тощо
 function flattenPositions(basePositions) {
   const out = [];
   const stack = Array.isArray(basePositions) ? [...basePositions] : [];
   while (stack.length) {
     const p = stack.shift();
     out.push(p);
-    for (const k of [
-      "modifiers",
-      "modifications",
-      "ingredients",
-      "additives",
-      "additionals",
-      "children",
-      "extras",
-    ]) {
+    for (const k of ["modifiers","modifications","ingredients","additives","additionals","children","extras"]) {
       if (Array.isArray(p?.[k]) && p[k].length) stack.push(...p[k]);
     }
   }
@@ -105,32 +95,24 @@ const pickQty = (p) => Number(p.count ?? p.quantity ?? p.qty ?? 0) || 0;
 const pickSumCents = (p) => {
   const c =
     Number(p.sum ?? p.total ?? p.cost_sum) ||
-    Number(p.price ?? p.cost_price ?? 0) * Number(p.count ?? p.quantity ?? 0);
+    (Number(p.price ?? p.cost_price ?? 0) * Number(p.count ?? p.quantity ?? 0));
   return Number.isFinite(c) ? c : 0;
 };
 
-// витягнути category_id з позиції з урахуванням мапи продуктів
-function resolveCategoryId(pos) {
-  // 1) пряме поле
-  const direct = Number(
-    pos.category_id ?? pos.menu_category_id ?? pos.product_category_id ?? pos.group_id ?? pos.category
-  );
-  if (Number.isFinite(direct)) return direct;
+const resolveProductId = (p) =>
+  Number(p.product_id ?? p.menu_id ?? p.id ?? p.good_id ?? p.dish_id ?? p.product ?? p.item_id);
 
-  // 2) за product_id через мапу
-  const pid = Number(
-    pos.product_id ?? pos.menu_id ?? pos.id ?? pos.good_id ?? pos.dish_id ?? pos.product ?? pos.item_id
-  );
-  if (Number.isFinite(pid) && PRODUCT_MAP.has(pid)) return PRODUCT_MAP.get(pid);
+const resolveCategoryId = (p) =>
+  Number(p.category_id ?? p.menu_category_id ?? p.product_category_id ?? p.group_id ?? p.category);
 
-  return null;
-}
-
-// -------------------- КАТЕГОРІЇ ПО СПІВРОБІТНИКАХ (СТРОГО ЗА ID) --------------------
+// -------------------- категории по сотрудникам (СТРОГО по ID категорий/товаров) --------------------
 /**
  * GET /api/waiters-categories?cats=17,41&dateFrom=YYYYMMDD&dateTo=YYYYMMDD
- * - Рахує по співробітнику: шукаємо позиції чеків і виводимо лише ті, що вказаних категорій.
- * - «overall» додаємо з офіційного звіту dash.getCategoriesSales (сума/кількість без розрізу).
+ * Логика:
+ *  - тянем карту всех товаров (product_id -> category_id)
+ *  - формируем множество product_id, которые принадлежат указанным категориям
+ *  - при обходе чеков считаем позицию, если (category_id ∈ cats) ИЛИ (product_id ∈ productIdSet)
+ *  - "overall" дополнительно берём из dash.getCategoriesSales (для сверки)
  */
 app.get("/api/waiters-categories", async (req, res) => {
   try {
@@ -138,32 +120,36 @@ app.get("/api/waiters-categories", async (req, res) => {
 
     const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
     const CATS = String(req.query.cats || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map(Number)
-      .filter(Number.isFinite);
+      .split(",").map((s) => s.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
+    if (!CATS.length) return res.json({ response: [], overall: [] });
 
-    // 0) карта товар->категорія
+    // 0) гарантируем карту товаров
     await ensureProductsMap();
 
-    // A) overall (надійно працює завжди)
+    // множество product_id из требуемых категорий
+    const wantCats = new Set(CATS);
+    const productIdSet = new Set(
+      [...PRODUCT_MAP.entries()]
+        .filter(([, cid]) => wantCats.has(cid))
+        .map(([pid]) => pid)
+    );
+
+    // A) overall (официальный отчёт по категориям)
     let overall = [];
-    if (CATS.length) {
+    try {
       const cats = await poster("dash.getCategoriesSales", { dateFrom, dateTo });
       const resp = Array.isArray(cats?.response) ? cats.response : [];
-      const want = new Set(CATS.map(String));
       overall = resp
-        .filter((x) => want.has(String(x.category_id)))
+        .filter((x) => wantCats.has(Number(x.category_id)))
         .map((x) => ({
           category_id: Number(x.category_id),
           count: Number(x.count || 0),
           sum_uah: Math.round(Number(x.revenue || 0)) / 100,
           name: x.category_name || "",
         }));
-    }
+    } catch { /* необязательно, служит только для сверки */ }
 
-    // B) транзакції з позиціями
+    // B) транзакции с позициями
     const methods = [
       { m: "transactions.getTransactions", p: { include: "products,receipt_positions" } },
       { m: "transactions.getTransactions", p: { expand: "positions" } },
@@ -175,17 +161,15 @@ app.get("/api/waiters-categories", async (req, res) => {
     for (const cand of methods) {
       try {
         const j = await poster(cand.m, { dateFrom, dateTo, ...cand.p });
-        const arr =
-          [j?.response, j?.response?.transactions, j?.transactions, j?.data].find(Array.isArray) || [];
+        const arr = [j?.response, j?.response?.transactions, j?.transactions, j?.data]
+          .find(Array.isArray) || [];
         if (arr.length) { checks = arr; used = cand; break; }
       } catch { /* try next */ }
     }
 
     let response = [];
-    if (checks && CATS.length) {
-      const want = new Set(CATS);
+    if (checks) {
       const byWaiter = new Map();
-      let scanned = 0, matched = 0;
 
       for (const tr of checks) {
         const wid = pickWaiterId(tr);
@@ -194,12 +178,14 @@ app.get("/api/waiters-categories", async (req, res) => {
 
         const flat = flattenPositions(pickPositions(tr));
         for (const pos of flat) {
-          scanned += 1;
           const cid = resolveCategoryId(pos);
-          if (!Number.isFinite(cid)) continue;
-          if (!want.has(cid)) continue;
+          const pid = resolveProductId(pos);
 
-          matched += 1;
+          // матч по категории ИЛИ по product_id из нужных категорий
+          const belongsByCat = Number.isFinite(cid) && wantCats.has(cid);
+          const belongsByPid = Number.isFinite(pid) && productIdSet.has(pid);
+          if (!belongsByCat && !belongsByPid) continue;
+
           const qty = pickQty(pos);
           const cents = pickSumCents(pos);
 
@@ -207,9 +193,10 @@ app.get("/api/waiters-categories", async (req, res) => {
           const w = byWaiter.get(wid);
           w.qty += qty; w.cents += cents;
 
-          const slot = w.cats.get(cid) || { qty: 0, cents: 0 };
+          const finalCid = belongsByCat ? cid : (PRODUCT_MAP.get(pid) ?? cid);
+          const slot = w.cats.get(finalCid) || { qty: 0, cents: 0 };
           slot.qty += qty; slot.cents += cents;
-          w.cats.set(cid, slot);
+          w.cats.set(finalCid, slot);
         }
       }
 
@@ -231,7 +218,25 @@ app.get("/api/waiters-categories", async (req, res) => {
   }
 });
 
-// -------------------- ДІАГНОСТИКА: ЧИ Є ПОЗИЦІЇ --------------------
+// -------------------- меню категорий (для поиска ID) --------------------
+app.get("/api/menu-categories", async (_req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+    const data = await poster("menu.getCategories");
+    const list = Array.isArray(data?.response) ? data.response : [];
+    res.json({
+      response: list.map((c) => ({
+        category_id: Number(c.category_id ?? c.id ?? 0),
+        category_name: String(c.category_name ?? c.name ?? ""),
+      })),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error", detail: String(e) });
+  }
+});
+
+// -------------------- диагностика: показывает пример позиций --------------------
 app.get("/api/debug/tx", async (req, res) => {
   try {
     if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
@@ -247,17 +252,17 @@ app.get("/api/debug/tx", async (req, res) => {
     for (const cand of methods) {
       try {
         const j = await poster(cand.m, { dateFrom, dateTo, ...cand.p });
-        const arr =
-          [j?.response, j?.response?.transactions, j?.transactions, j?.data].find(Array.isArray) || [];
+        const arr = [j?.response, j?.response?.transactions, j?.transactions, j?.data]
+          .find(Array.isArray) || [];
         if (arr.length) {
           const out = arr.slice(0, Number(limit)).map((tr) => ({
             waiter_id: tr.user_id ?? tr.waiter_id ?? tr.employee_id ?? null,
             positions_sample: flattenPositions(pickPositions(tr))
-              .slice(0, 6)
+              .slice(0, 8)
               .map((p) => ({
                 name: p.product_name ?? p.name ?? "",
-                product_id: p.product_id ?? p.menu_id ?? p.id ?? p.good_id ?? null,
-                category_id: p.category_id ?? p.group_id ?? p.menu_category_id ?? p.category ?? null,
+                product_id: resolveProductId(p),
+                category_id: resolveCategoryId(p),
                 qty: p.count ?? p.quantity ?? p.qty ?? 0,
                 sum: p.sum ?? p.total ?? p.cost_sum ?? null,
               })),
