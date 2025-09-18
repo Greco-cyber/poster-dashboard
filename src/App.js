@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 
 const API_BASE = process.env.REACT_APP_API_BASE || "";
 
-// ====== КОНФІГ ======
-const SAUCE_CAT_IDS = [17];         // Соуси
-const ADDON_CAT_IDS = [41, 37];     // Допи
+// ========= ІДЕНТИФІКАТОРИ КАТЕГОРІЙ (СТРОГО ПО ID) =========
+const SAUCE_CAT_IDS = [17];        // <- впиши ваші ID соусів
+const ADDON_CAT_IDS = [37, 41];    // <- впиши ваші ID допів
 
 // % бонусу
 const BONUS = {
@@ -12,10 +12,10 @@ const BONUS = {
   bartender: { sauce: 0.35, addon: 0.35 },
 };
 
-// Ролі (підстав свої ID)
+// роли
 const ROLE_BY_USER = { 18: "bartender", 24: "waiter", 25: "bartender", 35: "waiter" };
 
-// ====== utils ======
+// ===== utils =====
 function yyyymmdd(d = new Date()) { const p=(n)=>String(n).padStart(2,"0"); return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}`; }
 function dateInputValue(s){return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;}
 function firstDayOfMonthStr(s){return `${s.slice(0,4)}${s.slice(4,6)}01`;}
@@ -24,7 +24,6 @@ function daysInMonthOfDateStr(s){const y=+s.slice(0,4),m=+s.slice(4,6);return ne
 const money=(n)=>Number(n).toLocaleString("uk-UA",{minimumFractionDigits:2,maximumFractionDigits:2});
 const intf=(n)=>Number(n).toLocaleString("uk-UA",{maximumFractionDigits:0});
 
-// сума категорій (включаючи спец-ключ "kw" з бекенда)
 function pickCatsSum(map, userId, catIds) {
   const u = map[userId];
   if (!u || !u.categories) return { qty: 0, sum: 0 };
@@ -33,12 +32,9 @@ function pickCatsSum(map, userId, catIds) {
     const slot = u.categories[String(cid)];
     if (slot) { qty += Number(slot.qty||0); sum += Number(slot.sum_uah||0); }
   }
-  const kw = u.categories["kw"];
-  if (kw) { qty += Number(kw.qty||0); sum += Number(kw.sum_uah||0); }
   return { qty, sum };
 }
 
-// сума з "overall" (звіти по категоріях без розрізу співробітників)
 function sumOverall(overall = []) {
   let qty = 0, sum = 0;
   for (const r of overall) { qty += Number(r.count || 0); sum += Number(r.sum_uah || 0); }
@@ -46,66 +42,60 @@ function sumOverall(overall = []) {
 }
 
 export default function App(){
+  const today=useMemo(()=>yyyymmdd(),[]);
+  const [date,setDate]=useState(today);
+
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
 
-  const [daySales,setDaySales]=useState([]);            // по офіціантах (день)
+  const [daySales,setDaySales]=useState([]);
   const [avgPerMonthMap,setAvgPerMonthMap]=useState({});
 
-  // по співробітниках (як було; може бути 0, якщо Poster не віддає позиції)
+  // по співробітниках (можуть бути 0, якщо API не повертає позиції)
   const [saucesDay,setSaucesDay]=useState({});
   const [addonsDay,setAddonsDay]=useState({});
-  const [saucesMonthByUser,setSaucesMonthByUser]=useState({}); // тримаємо для сумісності
+  const [saucesMonth,setSaucesMonth]=useState({});
 
-  // НОВЕ: агрегати з dash.getCategoriesSales (overall)
+  // агрегати з dash.getCategoriesSales
   const [overallSaucesDay,setOverallSaucesDay]=useState({qty:0,sum:0});
   const [overallAddonsDay,setOverallAddonsDay]=useState({qty:0,sum:0});
   const [overallSaucesMonth,setOverallSaucesMonth]=useState({qty:0,sum:0});
 
-  const today=useMemo(()=>yyyymmdd(),[]);
-  const [date,setDate]=useState(today);
-
   async function load(){
     setLoading(true); setError("");
     try{
-      const base=API_BASE||"";
       const mFrom=firstDayOfMonthStr(date);
       const mTo=lastDayOfMonthStr(date);
 
-      // базові звіти по офіціантах
-      const dayUrl   = `${base}/api/waiters-sales?dateFrom=${date}&dateTo=${date}`;
-      const monthUrl = `${base}/api/waiters-sales?dateFrom=${mFrom}&dateTo=${mTo}`;
+      const dayUrl   = `${API_BASE}/api/waiters-sales?dateFrom=${date}&dateTo=${date}`;
+      const monthUrl = `${API_BASE}/api/waiters-sales?dateFrom=${mFrom}&dateTo=${mTo}`;
 
-      // категорії (ендпоінт із бекенда; повертає per-user + overall)
-      const enc = encodeURIComponent;
-      const sauceDayUrl   = `${base}/api/waiters-categories?cats=${SAUCE_CAT_IDS.join(",")}&dateFrom=${date}&dateTo=${date}`;
-      const addonDayUrl   = `${base}/api/waiters-categories?cats=${ADDON_CAT_IDS.join(",")}&dateFrom=${date}&dateTo=${date}`;
-      const sauceMonthUrl = `${base}/api/waiters-categories?cats=${SAUCE_CAT_IDS.join(",")}&dateFrom=${mFrom}&dateTo=${mTo}`;
+      // строго по ID категорій
+      const sauceDayUrl   = `${API_BASE}/api/waiters-categories?cats=${SAUCE_CAT_IDS.join(",")}&dateFrom=${date}&dateTo=${date}`;
+      const addonDayUrl   = `${API_BASE}/api/waiters-categories?cats=${ADDON_CAT_IDS.join(",")}&dateFrom=${date}&dateTo=${date}`;
+      const sauceMonthUrl = `${API_BASE}/api/waiters-categories?cats=${SAUCE_CAT_IDS.join(",")}&dateFrom=${mFrom}&dateTo=${mTo}`;
 
       const [rDay,rMonth,rSauD,rAddD,rSauM]=await Promise.all([
         fetch(dayUrl), fetch(monthUrl), fetch(sauceDayUrl), fetch(addonDayUrl), fetch(sauceMonthUrl)
       ]);
 
-      const [tDay,tMonth,tSauD,tAddD,tSauM]=await Promise.all([
-        rDay.text(), rMonth.text(), rSauD.text(), rAddD.text(), rSauM.text()
-      ]);
+      const [tDay,tMonth,tSauD,tAddD,tSauM]=await Promise.all([rDay.text(),rMonth.text(),rSauD.text(),rAddD.text(),rSauM.text()]);
+      if(!rDay.ok)   throw new Error(tDay);
+      if(!rMonth.ok) throw new Error(tMonth);
+      if(!rSauD.ok)  throw new Error(tSauD);
+      if(!rAddD.ok)  throw new Error(tAddD);
+      if(!rSauM.ok)  throw new Error(tSauM);
 
-      if(!rDay.ok)   throw new Error(`HTTP ${rDay.status}: ${tDay.slice(0,150)}`);
-      if(!rMonth.ok) throw new Error(`HTTP ${rMonth.status}: ${tMonth.slice(0,150)}`);
-      if(!rSauD.ok)  throw new Error(`HTTP ${rSauD.status}: ${tSauD.slice(0,150)}`);
-      if(!rAddD.ok)  throw new Error(`HTTP ${rAddD.status}: ${tAddD.slice(0,150)}`);
-      if(!rSauM.ok)  throw new Error(`HTTP ${rSauM.status}: ${tSauM.slice(0,150)}`);
+      const dDay=JSON.parse(tDay||"{}");
+      const dMon=JSON.parse(tMonth||"{}");
+      const dSauD=JSON.parse(tSauD||"{}");
+      const dAddD=JSON.parse(tAddD||"{}");
+      const dSauM=JSON.parse(tSauM||"{}");
 
-      const dDay  = JSON.parse(tDay||"{}");
-      const dMon  = JSON.parse(tMonth||"{}");
-      const dSauD = JSON.parse(tSauD||"{}");
-      const dAddD = JSON.parse(tAddD||"{}");
-      const dSauM = JSON.parse(tSauM||"{}");
+      const dayList=Array.isArray(dDay?.response)?dDay.response:[];
+      const monthList=Array.isArray(dMon?.response)?dMon.response:[];
 
-      const dayList   = Array.isArray(dDay?.response)? dDay.response : [];
-      const monthList = Array.isArray(dMon?.response)? dMon.response : [];
-
-      // карти середнього чека по місяцю
+      // середній чек/міс по юзеру
       const avgMap={};
       for(const w of monthList){
         const revenueUAH=Number(w.revenue||0)/100;
@@ -113,16 +103,14 @@ export default function App(){
         avgMap[w.user_id]=checks>0?revenueUAH/checks:0;
       }
 
-      // перетворювач response->map для per-user
       const toMap=(obj)=>{const m={}; for(const row of obj?.response||[]) m[row.user_id]=row; return m;};
 
       setDaySales(dayList);
       setAvgPerMonthMap(avgMap);
       setSaucesDay(toMap(dSauD));
       setAddonsDay(toMap(dAddD));
-      setSaucesMonthByUser(toMap(dSauM));
+      setSaucesMonth(toMap(dSauM));
 
-      // **НОВЕ**: читаємо поле overall (агрегати з dash.getCategoriesSales)
       setOverallSaucesDay(sumOverall(dSauD?.overall));
       setOverallAddonsDay(sumOverall(dAddD?.overall));
       setOverallSaucesMonth(sumOverall(dSauM?.overall));
@@ -144,20 +132,17 @@ export default function App(){
   }
 
   const daysInMonth = daysInMonthOfDateStr(date);
-
-  // активні співробітники в місяці (є чеки)
   const activeWaitersInMonth = useMemo(()=>{
     let n=0; for(const k in avgPerMonthMap){ if(Number.isFinite(avgPerMonthMap[k])) n++; }
     return Math.max(n, 1);
   },[avgPerMonthMap]);
 
-  // стандарт соусів/день на співробітника = (усі соуси місяця / днів / активних)
   const sauceStdPerDayPerEmployee = useMemo(()=>{
     if (daysInMonth<=0) return 0;
     return (overallSaucesMonth.qty || 0) / daysInMonth / activeWaitersInMonth;
   },[overallSaucesMonth, daysInMonth, activeWaitersInMonth]);
 
-  // лідерборди (залишаємо як було)
+  // Лідерборди
   const leaderboards = useMemo(()=>{
     const arr = daySales.map((w)=>{
       const uid=w.user_id;
@@ -189,7 +174,6 @@ export default function App(){
   return (
     <div className="min-h-screen bg-black text-white relative">
       <div className="max-w-6xl mx-auto p-4 pb-20">
-        {/* ====== Хедер ====== */}
         <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
           <h1 className="text-2xl font-semibold">Зміна: продажі офіціантів (за день)</h1>
           <div className="flex items-center gap-2">
@@ -201,7 +185,7 @@ export default function App(){
           </div>
         </header>
 
-        {/* ====== Підсумок по категоріях (ДЕНЬ) з dash.getCategoriesSales ====== */}
+        {/* Підсумок по категоріях (день) */}
         <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-3 mb-4 text-sm">
           <div className="flex flex-wrap gap-4">
             <div><span className="text-neutral-400">Соуси (разом за день):</span> {intf(overallSaucesDay.qty)} шт / {money(overallSaucesDay.sum)} ₴</div>
@@ -210,11 +194,11 @@ export default function App(){
           </div>
         </div>
 
-        {/* ====== Лідерборди ====== */}
+        {/* Лідерборди */}
         <section className="mb-6">
           <h2 className="text-lg font-semibold mb-3">Лідерборди (онлайн)</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* Соуси на 20 чеків */}
+            {/* Соуси */}
             <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
               <div className="text-sm text-neutral-400 mb-2">Соуси на 20 чеків</div>
               <ol className="space-y-2">
@@ -232,8 +216,7 @@ export default function App(){
                 ))}
               </ol>
             </div>
-
-            {/* Допи на 20 чеків */}
+            {/* Допи */}
             <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
               <div className="text-sm text-neutral-400 mb-2">Допи на 20 чеків</div>
               <ol className="space-y-2">
@@ -251,8 +234,7 @@ export default function App(){
                 ))}
               </ol>
             </div>
-
-            {/* Δ Середній чек (день – міс) */}
+            {/* ∆ Avg чек */}
             <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
               <div className="text-sm text-neutral-400 mb-2">Δ Середній чек (день – міс)</div>
               <ol className="space-y-2">
@@ -278,22 +260,19 @@ export default function App(){
           </div>
         </section>
 
-        {/* ====== Картки ====== */}
+        {/* Картки */}
         {loading && <div className="animate-pulse text-neutral-300">Завантаження…</div>}
         {error && <div className="text-red-400">{error}</div>}
-
         {!loading && !error && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {daySales.map((w)=>{
-              const uid=w.user_id;
-              const role=ROLE_BY_USER[uid]||"waiter";
+              const uid=w.user_id; const role=ROLE_BY_USER[uid]||"waiter";
               const revenueUAH=Number(w.revenue||0)/100;
               const checks=Number(w.clients||0);
               const avgDay=checks>0?revenueUAH/checks:0;
               const avgMonth=avgPerMonthMap[uid];
 
-              const sDay=saucesDay[uid]||{};
-              const aDay=addonsDay[uid]||{};
+              const sDay=saucesDay[uid]||{}; const aDay=addonsDay[uid]||{};
               const sauce=pickCatsSum({[uid]:sDay},uid,SAUCE_CAT_IDS);
               const addon=pickCatsSum({[uid]:aDay},uid,ADDON_CAT_IDS);
 
@@ -338,7 +317,6 @@ export default function App(){
         )}
       </div>
 
-      {/* Лого (не перекладаємо) */}
       <div className="fixed right-3 bottom-3 text-xs text-neutral-500/80 select-none">GRECO Tech ™</div>
     </div>
   );
