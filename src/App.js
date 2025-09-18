@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-const API_BASE = process.env.REACT_APP_API_BASE || ""; // "" = относительный путь (локально с proxy)
+const API_BASE = process.env.REACT_APP_API_BASE || ""; // "" => относительный путь (локально через proxy)
 
 function yyyymmdd(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
 }
 
-function dateInputValue(yyyymmddStr) {
-  return `${yyyymmddStr.slice(0, 4)}-${yyyymmddStr.slice(4, 6)}-${yyyymmddStr.slice(6, 8)}`;
+function dateInputValue(s) {
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
 }
 
 export default function App() {
@@ -41,7 +41,7 @@ export default function App() {
 
   useEffect(() => {
     load();
-  }, [dateFrom]); // теперь линтер не ругается
+  }, [dateFrom]);
 
   return (
     <div className="min-h-screen">
@@ -73,3 +73,35 @@ export default function App() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {sales.map((w) => (
               <div
+                key={w.user_id}
+                className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-lg font-medium">{w.name || "—"}</div>
+                  <div className="text-xs text-neutral-500">ID {w.user_id}</div>
+                </div>
+                <div className="space-y-1 text-sm">
+                  <div>Выручка: {Number(w.revenue || 0).toLocaleString("uk-UA")}</div>
+                  <div>Прибыль (брутто): {Number(w.profit || 0).toLocaleString("uk-UA")}</div>
+                  <div>Прибыль (нетто): {Number(w.profit_netto || 0).toLocaleString("uk-UA")}</div>
+                  <div>Клиенты: {Number(w.clients || 0).toLocaleString("uk-UA")}</div>
+                  <div>
+                    Ср. чек: {Math.round(Number(w.middle_invoice || 0)).toLocaleString("uk-UA")}
+                  </div>
+                  {w.middle_time != null && (
+                    <div>
+                      Ср. время, сек: {Math.round(Number(w.middle_time)).toLocaleString("uk-UA")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {sales.length === 0 && (
+              <div className="text-neutral-400">Нет данных за выбранную дату.</div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
