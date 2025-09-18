@@ -23,10 +23,9 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
-      const url = new URL(`${API_BASE}/api/waiters-sales`, window.location.origin);
-      url.search = new URLSearchParams({ dateFrom }).toString();
-      // Если API_BASE задан, соберём руками:
-      const finalUrl = API_BASE ? `${API_BASE}/api/waiters-sales?dateFrom=${dateFrom}` : url.toString();
+      const finalUrl = API_BASE
+        ? `${API_BASE}/api/waiters-sales?dateFrom=${dateFrom}`
+        : `/api/waiters-sales?dateFrom=${dateFrom}`;
 
       const r = await fetch(finalUrl);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -42,8 +41,7 @@ export default function App() {
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFrom]);
+  }, [dateFrom]); // теперь линтер не ругается
 
   return (
     <div className="min-h-screen">
@@ -75,31 +73,3 @@ export default function App() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {sales.map((w) => (
               <div
-                key={w.user_id}
-                className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-lg font-medium">{w.name || "—"}</div>
-                  <div className="text-xs text-neutral-500">ID {w.user_id}</div>
-                </div>
-                <div className="space-y-1 text-sm">
-                  <div>Выручка: {Number(w.revenue || 0).toLocaleString("uk-UA")}</div>
-                  <div>Прибыль (брутто): {Number(w.profit || 0).toLocaleString("uk-UA")}</div>
-                  <div>Прибыль (нетто): {Number(w.profit_netto || 0).toLocaleString("uk-UA")}</div>
-                  <div>Клиенты: {Number(w.clients || 0).toLocaleString("uk-UA")}</div>
-                  <div>Ср. чек: {Math.round(Number(w.middle_invoice || 0)).toLocaleString("uk-UA")}</div>
-                  {typeof w.middle_time !== "undefined" && (
-                    <div>Ср. время, сек: {Math.round(Number(w.middle_time || 0)).toLocaleString("uk-UA")}</div>
-                  )}
-                </div>
-              </div>
-            ))}
-            {sales.length === 0 && (
-              <div className="text-neutral-400">Нет данных за выбранную дату.</div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
