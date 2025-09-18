@@ -1,23 +1,22 @@
-// server.js
-import express from "express";
-import fetch from "node-fetch"; // если Node <18, иначе можно глобальный fetch
-import cors from "cors";
+// server.js (CommonJS)
+const express = require("express");
+const fetch = require("node-fetch"); // если Node >=18, можно удалить и использовать глобальный fetch
+const cors = require("cors");
 
 const app = express();
 app.use(cors());
 
-// Настройки
 const POSTER_BASE = "https://joinposter.com/api";
-const TOKEN = process.env.POSTER_TOKEN; // задай в Render → Environment
+const TOKEN = process.env.POSTER_TOKEN; // Укажи в Render → Environment
 
 if (!TOKEN) {
-  console.warn("WARNING: POSTER_TOKEN не задан в переменных окружения!");
+  console.warn("[WARN] POSTER_TOKEN не задан! Укажи переменную окружения.");
 }
 
-// Пример: продажи официантов за период
+// Пример: продажи официантов за дату/период
 app.get("/api/waiters-sales", async (req, res) => {
   try {
-    const { dateFrom, dateTo } = req.query; // YYYYMMDD
+    const { dateFrom, dateTo } = req.query; // формата YYYYMMDD
     const url = new URL(`${POSTER_BASE}/dash.getWaitersSales`);
     url.searchParams.set("token", TOKEN);
     if (dateFrom) url.searchParams.set("dateFrom", dateFrom);
@@ -28,18 +27,17 @@ app.get("/api/waiters-sales", async (req, res) => {
     res.json(data);
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "API error" });
   }
 });
 
-// Пример: выручка по смене (если используешь другой ендпоинт — добавь тут)
-app.get("/api/shift", async (req, res) => {
+// Заглушка под «данные по смене» — добавь нужный метод Poster здесь
+app.get("/api/shift", async (_req, res) => {
   try {
-    // TODO: подставь нужный метод Poster + параметры
-    res.json({ ok: true, hint: "Добавь тут нужный метод Poster для смены" });
+    res.json({ ok: true, hint: "Добавь нужный эндпоинт Poster для смены" });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "API error" });
   }
 });
 
