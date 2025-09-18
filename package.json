@@ -1,41 +1,29 @@
 {
-  "name": "poster-employee-dashboard",
+  "name": "poster-shift-dashboard",
   "version": "1.0.0",
-  "description": "Dashboard for Poster employees with real-time stats",
   "private": true,
-  "dependencies": {
-    "@testing-library/jest-dom": "^5.16.4",
-    "@testing-library/react": "^13.3.0",
-    "@testing-library/user-event": "^13.5.0",
-    "lucide-react": "^0.263.1",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1",
-    "web-vitals": "^2.1.4"
-  },
+  "description": "GRECO | Одностраничник для данных по смене (фронт) + прокси к Poster (бэк).",
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "start:server": "node server.js",
+    "dev": "concurrently \"npm run start:server\" \"npm start\"",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "node-fetch": "^2.7.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-scripts": "5.0.1"
   },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+  "devDependencies": {
+    "concurrently": "^9.0.1"
   },
-  "homepage": "."
+  "proxy": "http://localhost:3001",
+  "engines": {
+    "node": ">=16"
+  }
 }
