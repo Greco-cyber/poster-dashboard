@@ -11,13 +11,12 @@ function dateInputValue(s) {
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
 }
 function firstDayOfMonthStr(s) {
-  // YYYYMM01
   return `${s.slice(0, 4)}${s.slice(4, 6)}01`;
 }
 function lastDayOfMonthStr(s) {
   const y = Number(s.slice(0, 4));
-  const m = Number(s.slice(4, 6)); // 1..12
-  const last = new Date(y, m, 0); // последний день месяца
+  const m = Number(s.slice(4, 6));
+  const last = new Date(y, m, 0);
   const pad = (n) => String(n).padStart(2, "0");
   return `${last.getFullYear()}${pad(last.getMonth() + 1)}${pad(last.getDate())}`;
 }
@@ -29,23 +28,20 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // дневные данные по официантам
+  // денні дані по офіціантах
   const [daySales, setDaySales] = useState([]);
-  // мапа user_id -> средний чек за месяц (в грн)
+  // user_id -> середній чек за місяць
   const [avgPerMonthMap, setAvgPerMonthMap] = useState({});
 
   const today = useMemo(() => yyyymmdd(), []);
-  const [date, setDate] = useState(today); // один выбранный день
+  const [date, setDate] = useState(today);
 
-  // основной лоадер: тянем ДЕНЬ и МЕСЯЦ
   async function load() {
     setLoading(true);
     setError("");
     try {
       const base = API_BASE || "";
-      // День
       const dayUrl = `${base}/api/waiters-sales?dateFrom=${date}&dateTo=${date}`;
-      // Месяц (тот, в который входит выбранный день)
       const mFrom = firstDayOfMonthStr(date);
       const mTo = lastDayOfMonthStr(date);
       const monthUrl = `${base}/api/waiters-sales?dateFrom=${mFrom}&dateTo=${mTo}`;
@@ -62,11 +58,10 @@ export default function App() {
       const dayList = Array.isArray(dDay?.response) ? dDay.response : [];
       const monthList = Array.isArray(dMonth?.response) ? dMonth.response : [];
 
-      // суммы из Poster приходят в копейках → делим на 100
-      // считаем средний чек за МЕСЯЦ для каждого user_id
+      // побудуємо мапу середнього чека за місяць
       const avgMap = {};
       for (const w of monthList) {
-        const revenueUAH = Number(w.revenue || 0) / 100;
+        const revenueUAH = Number(w.revenue || 0) / 100; // копійки -> грн
         const checks = Number(w.clients || 0);
         avgMap[w.user_id] = checks > 0 ? revenueUAH / checks : 0;
       }
@@ -75,31 +70,44 @@ export default function App() {
       setAvgPerMonthMap(avgMap);
     } catch (e) {
       console.error(e);
-      setError("Не удалось загрузить данные. Проверь адрес API, токен или дату.");
+      setError("Не вдалося завантажити дані. Перевір адресу API, токен або дату.");
     } finally {
       setLoading(false);
     }
   }
 
-  // загружаем при смене даты
+  // завантаження при зміні дати
   useEffect(() => {
     load();
   }, [date]);
 
-  // автообновление каждые 5 минут
+  // автооновлення кожні 5 хвилин
   useEffect(() => {
     const id = setInterval(() => {
       load();
     }, 5 * 60 * 1000);
     return () => clearInterval(id);
-    // привязываем к выбранной дате — при её смене таймер пересоздаётся
   }, [date]);
 
+  // значок-стрілка біля "Середній чек за день"
+  function TrendArrow({ dayAvg, monthAvg }) {
+    if (monthAvg == null) return null;
+    const delta = dayAvg - monthAvg;
+    const eps = 0.5; // поріг ~50 коп., щоб уникати миготіння
+    if (delta > eps) {
+      return <span className="ml-2 text-green-400 align-middle">▲</span>;
+    }
+    if (delta < -eps) {
+      return <span className="ml-2 text-red-400 align-middle">▼</span>;
+    }
+    return null; // рівні — без значка
+  }
+
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="max-w-5xl mx-auto p-4">
+    <div className="min-h-screen bg-black text-white relative">
+      <div className="max-w-5xl mx-auto p-4 pb-16">
         <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
-          <h1 className="text-2xl font-semibold">Смена: продажи официантов (за день)</h1>
+          <h1 className="text-2xl font-semibold">Зміна: продажі офіціантів (за день)</h1>
 
           <div className="flex items-center gap-2">
             <label className="text-sm text-neutral-400">Дата:</label>
@@ -112,26 +120,24 @@ export default function App() {
             <button
               onClick={load}
               className="px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-sm"
-              title="Обновить (автообновление каждые 5 минут включено)"
+              title="Оновити (автооновлення кожні 5 хв)"
             >
-              Обновить
+              Оновити
             </button>
           </div>
         </header>
 
-        {loading && <div className="animate-pulse text-neutral-300">Загружаю…</div>}
+        {loading && <div className="animate-pulse text-neutral-300">Завантаження…</div>}
         {error && <div className="text-red-400">{error}</div>}
 
         {!loading && !error && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {daySales.map((w) => {
-              // ДЕНЬ: суммы в копейках → делим на 100
-              const revenueUAH = Number(w.revenue || 0) / 100;
+              const revenueUAH = Number(w.revenue || 0) / 100; // копійки -> грн
               const checks = Number(w.clients || 0);
               const avgDay = checks > 0 ? revenueUAH / checks : 0;
 
-              // МЕСЯЦ: уже посчитали карту средних чеков
-              const avgMonth = avgPerMonthMap[w.user_id] ?? null;
+              const avgMonth = avgPerMonthMap[w.user_id];
 
               return (
                 <div key={w.user_id} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
@@ -140,19 +146,27 @@ export default function App() {
                     <div className="text-xs text-neutral-500">ID {w.user_id}</div>
                   </div>
                   <div className="space-y-1 text-sm">
-                    <div>Выручка за день: {money(revenueUAH)} ₴</div>
-                    <div>Количество чеков за день: {intf(checks)}</div>
-                    <div>Средний чек за день: {money(avgDay)} ₴</div>
-                    <div>Средний чек/мес: {avgMonth != null ? `${money(avgMonth)} ₴` : "—"}</div>
+                    <div>Виручка за день: {money(revenueUAH)} ₴</div>
+                    <div>Кількість чеків за день: {intf(checks)}</div>
+                    <div className="flex items-center">
+                      <span>Середній чек за день: {money(avgDay)} ₴</span>
+                      <TrendArrow dayAvg={avgDay} monthAvg={avgMonth} />
+                    </div>
+                    <div>Середній чек/міс: {avgMonth != null ? `${money(avgMonth)} ₴` : "—"}</div>
                   </div>
                 </div>
               );
             })}
             {daySales.length === 0 && (
-              <div className="text-neutral-400">Нет данных за выбранную дату.</div>
+              <div className="text-neutral-400">Немає даних за обрану дату.</div>
             )}
           </div>
         )}
+      </div>
+
+      {/* Логотип у правому нижньому куті (не перекладати) */}
+      <div className="fixed right-3 bottom-3 text-xs text-neutral-500/80 select-none">
+        GRECO Tech ™
       </div>
     </div>
   );
