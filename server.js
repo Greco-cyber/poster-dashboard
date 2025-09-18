@@ -27,7 +27,7 @@ async function poster(method, params = {}) {
   return j;
 }
 
-// -------- базовий звіт по офіціантах --------
+// -------------------- БАЗОВИЙ ДАШБОРД ПО ОФІЦІАНТАХ --------------------
 app.get("/api/waiters-sales", async (req, res) => {
   try {
     if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
@@ -40,13 +40,97 @@ app.get("/api/waiters-sales", async (req, res) => {
   }
 });
 
+// -------------------- КЕШ ПРОДУКТІВ (product_id -> category_id) --------------------
+let PRODUCT_MAP = new Map(); // product_id:number -> category_id:number
+let PRODUCT_CACHE_AT = 0;
+const PRODUCT_TTL_MS = 15 * 60 * 1000; // 15 хв
+
+async function ensureProductsMap() {
+  const now = Date.now();
+  if (PRODUCT_MAP.size && now - PRODUCT_CACHE_AT < PRODUCT_TTL_MS) return;
+
+  const list = await poster("menu.getProducts"); // повертає всі товари з category_id
+  const arr = Array.isArray(list?.response) ? list.response : [];
+  const map = new Map();
+  for (const p of arr) {
+    const pid = Number(p.product_id ?? p.id ?? p.menu_id ?? p.good_id);
+    const cid = Number(p.menu_category_id ?? p.category_id ?? p.group_id ?? p.category);
+    if (Number.isFinite(pid) && Number.isFinite(cid)) map.set(pid, cid);
+  }
+  PRODUCT_MAP = map;
+  PRODUCT_CACHE_AT = now;
+}
+
+// -------------------- ДОПОМОЖНІ ПАРСЕРИ --------------------
+const pickWaiterId   = (tr) => tr.user_id ?? tr.waiter_id ?? tr.cashier_id ?? tr.employee_id ?? null;
+const pickWaiterName = (tr) => tr.user_name ?? tr.waiter_name ?? tr.employee_name ?? tr.name ?? `ID?`;
+
+// можливі поля з позиціями
+function pickPositions(tr) {
+  return (
+    tr.receipt_positions ??
+    tr.positions ??
+    tr.products ??
+    tr.items ??
+    tr.menu ??
+    tr.goods ??
+    tr.receipt_goods ??
+    []
+  ) || [];
+}
+
+// «сплющуємо» модифікатори, інгредієнти тощо
+function flattenPositions(basePositions) {
+  const out = [];
+  const stack = Array.isArray(basePositions) ? [...basePositions] : [];
+  while (stack.length) {
+    const p = stack.shift();
+    out.push(p);
+    for (const k of [
+      "modifiers",
+      "modifications",
+      "ingredients",
+      "additives",
+      "additionals",
+      "children",
+      "extras",
+    ]) {
+      if (Array.isArray(p?.[k]) && p[k].length) stack.push(...p[k]);
+    }
+  }
+  return out;
+}
+
+const pickQty = (p) => Number(p.count ?? p.quantity ?? p.qty ?? 0) || 0;
+const pickSumCents = (p) => {
+  const c =
+    Number(p.sum ?? p.total ?? p.cost_sum) ||
+    Number(p.price ?? p.cost_price ?? 0) * Number(p.count ?? p.quantity ?? 0);
+  return Number.isFinite(c) ? c : 0;
+};
+
+// витягнути category_id з позиції з урахуванням мапи продуктів
+function resolveCategoryId(pos) {
+  // 1) пряме поле
+  const direct = Number(
+    pos.category_id ?? pos.menu_category_id ?? pos.product_category_id ?? pos.group_id ?? pos.category
+  );
+  if (Number.isFinite(direct)) return direct;
+
+  // 2) за product_id через мапу
+  const pid = Number(
+    pos.product_id ?? pos.menu_id ?? pos.id ?? pos.good_id ?? pos.dish_id ?? pos.product ?? pos.item_id
+  );
+  if (Number.isFinite(pid) && PRODUCT_MAP.has(pid)) return PRODUCT_MAP.get(pid);
+
+  return null;
+}
+
+// -------------------- КАТЕГОРІЇ ПО СПІВРОБІТНИКАХ (СТРОГО ЗА ID) --------------------
 /**
- * Продажі по категоріях у розрізі співробітників (СТРОГО за ID категорій)
  * GET /api/waiters-categories?cats=17,41&dateFrom=YYYYMMDD&dateTo=YYYYMMDD
- *
- * Логіка:
- * 1) Прагнемо отримати транзакції з позиціями і фільтруємо позиції з category_id ∈ cats.
- * 2) Додатково рахуємо "overall" через офіційний dash.getCategoriesSales (тільки загальна сума/кількість).
+ * - Рахує по співробітнику: шукаємо позиції чеків і виводимо лише ті, що вказаних категорій.
+ * - «overall» додаємо з офіційного звіту dash.getCategoriesSales (сума/кількість без розрізу).
  */
 app.get("/api/waiters-categories", async (req, res) => {
   try {
@@ -54,9 +138,16 @@ app.get("/api/waiters-categories", async (req, res) => {
 
     const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
     const CATS = String(req.query.cats || "")
-      .split(",").map((s) => s.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(Number)
+      .filter(Number.isFinite);
 
-    // ---- overall через офіційний звіт ----
+    // 0) карта товар->категорія
+    await ensureProductsMap();
+
+    // A) overall (надійно працює завжди)
     let overall = [];
     if (CATS.length) {
       const cats = await poster("dash.getCategoriesSales", { dateFrom, dateTo });
@@ -72,7 +163,7 @@ app.get("/api/waiters-categories", async (req, res) => {
         }));
     }
 
-    // ---- транзакції з позиціями для розрізу по співробітниках ----
+    // B) транзакції з позиціями
     const methods = [
       { m: "transactions.getTransactions", p: { include: "products,receipt_positions" } },
       { m: "transactions.getTransactions", p: { expand: "positions" } },
@@ -84,42 +175,44 @@ app.get("/api/waiters-categories", async (req, res) => {
     for (const cand of methods) {
       try {
         const j = await poster(cand.m, { dateFrom, dateTo, ...cand.p });
-        const arr = [j?.response, j?.response?.transactions, j?.transactions, j?.data]
-          .find(Array.isArray) || [];
+        const arr =
+          [j?.response, j?.response?.transactions, j?.transactions, j?.data].find(Array.isArray) || [];
         if (arr.length) { checks = arr; used = cand; break; }
       } catch { /* try next */ }
     }
 
-    const pickWaiterId   = (tr) => tr.user_id ?? tr.waiter_id ?? tr.cashier_id ?? tr.employee_id ?? null;
-    const pickWaiterName = (tr) => tr.user_name ?? tr.waiter_name ?? tr.employee_name ?? tr.name ?? `ID?`;
-    const pickPositions  = (tr) => tr.receipt_positions ?? tr.positions ?? tr.products ?? tr.items ?? tr.menu ?? [];
-    const pickCategoryId = (p)  => p.category_id ?? p.menu_category_id ?? p.product_category_id ?? p.group_id ?? p.category ?? null;
-    const pickQty        = (p)  => Number(p.count ?? p.quantity ?? p.qty ?? 0);
-    const pickSumCents   = (p)  => Number(p.sum ?? p.total ?? p.cost_sum ?? ((Number(p.price || 0)) * Number(p.count || 0)));
-
     let response = [];
     if (checks && CATS.length) {
+      const want = new Set(CATS);
       const byWaiter = new Map();
+      let scanned = 0, matched = 0;
+
       for (const tr of checks) {
         const wid = pickWaiterId(tr);
         if (wid == null) continue;
         const wname = pickWaiterName(tr);
-        const pos = pickPositions(tr) || [];
-        for (const p of pos) {
-          const cid = Number(pickCategoryId(p));
-          if (!Number.isFinite(cid)) continue;
-          if (!CATS.includes(cid)) continue; // СТРОГО по ID категорій
 
-          const qty = pickQty(p);
-          const sum = pickSumCents(p);
+        const flat = flattenPositions(pickPositions(tr));
+        for (const pos of flat) {
+          scanned += 1;
+          const cid = resolveCategoryId(pos);
+          if (!Number.isFinite(cid)) continue;
+          if (!want.has(cid)) continue;
+
+          matched += 1;
+          const qty = pickQty(pos);
+          const cents = pickSumCents(pos);
 
           if (!byWaiter.has(wid)) byWaiter.set(wid, { name: wname, qty: 0, cents: 0, cats: new Map() });
           const w = byWaiter.get(wid);
-          w.qty += qty; w.cents += sum;
+          w.qty += qty; w.cents += cents;
+
           const slot = w.cats.get(cid) || { qty: 0, cents: 0 };
-          slot.qty += qty; slot.cents += sum; w.cats.set(cid, slot);
+          slot.qty += qty; slot.cents += cents;
+          w.cats.set(cid, slot);
         }
       }
+
       response = [...byWaiter.entries()].map(([user_id, v]) => ({
         user_id,
         name: v.name,
@@ -138,7 +231,7 @@ app.get("/api/waiters-categories", async (req, res) => {
   }
 });
 
-// діагностика: чи повертає API позиції
+// -------------------- ДІАГНОСТИКА: ЧИ Є ПОЗИЦІЇ --------------------
 app.get("/api/debug/tx", async (req, res) => {
   try {
     if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
@@ -154,15 +247,16 @@ app.get("/api/debug/tx", async (req, res) => {
     for (const cand of methods) {
       try {
         const j = await poster(cand.m, { dateFrom, dateTo, ...cand.p });
-        const arr = [j?.response, j?.response?.transactions, j?.transactions, j?.data]
-          .find(Array.isArray) || [];
+        const arr =
+          [j?.response, j?.response?.transactions, j?.transactions, j?.data].find(Array.isArray) || [];
         if (arr.length) {
           const out = arr.slice(0, Number(limit)).map((tr) => ({
             waiter_id: tr.user_id ?? tr.waiter_id ?? tr.employee_id ?? null,
-            positions_sample: (tr.receipt_positions ?? tr.positions ?? tr.products ?? tr.items ?? tr.menu ?? [])
-              .slice(0, 5)
+            positions_sample: flattenPositions(pickPositions(tr))
+              .slice(0, 6)
               .map((p) => ({
                 name: p.product_name ?? p.name ?? "",
+                product_id: p.product_id ?? p.menu_id ?? p.id ?? p.good_id ?? null,
                 category_id: p.category_id ?? p.group_id ?? p.menu_category_id ?? p.category ?? null,
                 qty: p.count ?? p.quantity ?? p.qty ?? 0,
                 sum: p.sum ?? p.total ?? p.cost_sum ?? null,
@@ -170,7 +264,7 @@ app.get("/api/debug/tx", async (req, res) => {
           }));
           return res.json({ ok: true, method: cand.m, paramsTried: cand.p, sample: out });
         }
-      } catch {}
+      } catch { /* try next */ }
     }
     res.json({ ok: false, message: "No transactions with positions returned by API" });
   } catch (e) {
