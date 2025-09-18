@@ -2,7 +2,25 @@ import React, { useEffect, useMemo, useState } from "react";
 
 const API_BASE = process.env.REACT_APP_API_BASE || "";
 
-// --- utils ---
+// ====== КОНФІГ БОНУСІВ (за категоріями) ======
+const SAUCE_CAT_IDS = [17];
+const ADDON_CAT_IDS = [41, 37]; // порядок неважливий
+
+// % бонусу (за замовчуванням однакові)
+const BONUS = {
+  waiter: { sauce: 0.35, addon: 0.35 },
+  bartender: { sauce: 0.35, addon: 0.35 },
+};
+
+// Ролі співробітників (заповни свої ID за потреби)
+const ROLE_BY_USER = {
+  18: "bartender",
+  24: "waiter",
+  25: "bartender",
+  35: "waiter",
+};
+
+// ====== utils ======
 function yyyymmdd(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
@@ -20,18 +38,40 @@ function lastDayOfMonthStr(s) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${last.getFullYear()}${pad(last.getMonth() + 1)}${pad(last.getDate())}`;
 }
+function daysInMonthOfDateStr(s) {
+  const y = Number(s.slice(0, 4));
+  const m = Number(s.slice(4, 6));
+  return new Date(y, m, 0).getDate();
+}
 const money = (n) =>
   Number(n).toLocaleString("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const intf = (n) => Number(n).toLocaleString("uk-UA", { maximumFractionDigits: 0 });
+
+function pickCatsSum(map, userId, catIds) {
+  const u = map[userId];
+  if (!u || !u.categories) return { qty: 0, sum: 0 };
+  let qty = 0,
+    sum = 0;
+  for (const cid of catIds) {
+    const slot = u.categories[String(cid)];
+    if (slot) {
+      qty += Number(slot.qty || 0);
+      sum += Number(slot.sum_uah || 0);
+    }
+  }
+  return { qty, sum };
+}
 
 export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // денні дані по офіціантах
-  const [daySales, setDaySales] = useState([]);
-  // user_id -> середній чек за місяць
-  const [avgPerMonthMap, setAvgPerMonthMap] = useState({});
+  const [daySales, setDaySales] = useState([]); // waiters-sales (день)
+  const [avgPerMonthMap, setAvgPerMonthMap] = useState({}); // user_id -> avg чек/міс
+
+  const [saucesDay, setSaucesDay] = useState({}); // user_id -> { ... , categories: {cid:{qty,sum_uah}} }
+  const [addonsDay, setAddonsDay] = useState({});
+  const [saucesMonth, setSaucesMonth] = useState({}); // для стандарту/день
 
   const today = useMemo(() => yyyymmdd(), []);
   const [date, setDate] = useState(today);
@@ -41,33 +81,73 @@ export default function App() {
     setError("");
     try {
       const base = API_BASE || "";
+
+      // день (загальні продажі і середній чек за день)
       const dayUrl = `${base}/api/waiters-sales?dateFrom=${date}&dateTo=${date}`;
+
+      // місяць (для середнього чека/міс)
       const mFrom = firstDayOfMonthStr(date);
       const mTo = lastDayOfMonthStr(date);
       const monthUrl = `${base}/api/waiters-sales?dateFrom=${mFrom}&dateTo=${mTo}`;
 
-      const [rDay, rMonth] = await Promise.all([fetch(dayUrl), fetch(monthUrl)]);
-      const [tDay, tMonth] = await Promise.all([rDay.text(), rMonth.text()]);
+      // категорії: соуси/допи за ДЕНЬ
+      const catsSauceDayUrl = `${base}/api/waiters-categories?cats=${SAUCE_CAT_IDS.join(",")}&dateFrom=${date}&dateTo=${date}`;
+      const catsAddonDayUrl = `${base}/api/waiters-categories?cats=${ADDON_CAT_IDS.join(",")}&dateFrom=${date}&dateTo=${date}`;
+      // соуси за МІСЯЦЬ (для стандарту/день)
+      const catsSauceMonthUrl = `${base}/api/waiters-categories?cats=${SAUCE_CAT_IDS.join(",")}&dateFrom=${mFrom}&dateTo=${mTo}`;
 
-      if (!rDay.ok) throw new Error(`HTTP ${rDay.status}: ${tDay.slice(0, 200)}`);
-      if (!rMonth.ok) throw new Error(`HTTP ${rMonth.status}: ${tMonth.slice(0, 200)}`);
+      const [rDay, rMonth, rSauD, rAddD, rSauM] = await Promise.all([
+        fetch(dayUrl),
+        fetch(monthUrl),
+        fetch(catsSauceDayUrl),
+        fetch(catsAddonDayUrl),
+        fetch(catsSauceMonthUrl),
+      ]);
+
+      const [tDay, tMonth, tSauD, tAddD, tSauM] = await Promise.all([
+        rDay.text(),
+        rMonth.text(),
+        rSauD.text(),
+        rAddD.text(),
+        rSauM.text(),
+      ]);
+
+      if (!rDay.ok) throw new Error(`HTTP ${rDay.status}: ${tDay.slice(0, 150)}`);
+      if (!rMonth.ok) throw new Error(`HTTP ${rMonth.status}: ${tMonth.slice(0, 150)}`);
+      if (!rSauD.ok) throw new Error(`HTTP ${rSauD.status}: ${tSauD.slice(0, 150)}`);
+      if (!rAddD.ok) throw new Error(`HTTP ${rAddD.status}: ${tAddD.slice(0, 150)}`);
+      if (!rSauM.ok) throw new Error(`HTTP ${rSauM.status}: ${tSauM.slice(0, 150)}`);
 
       const dDay = JSON.parse(tDay || "{}");
       const dMonth = JSON.parse(tMonth || "{}");
+      const dSauD = JSON.parse(tSauD || "{}");
+      const dAddD = JSON.parse(tAddD || "{}");
+      const dSauM = JSON.parse(tSauM || "{}");
 
       const dayList = Array.isArray(dDay?.response) ? dDay.response : [];
       const monthList = Array.isArray(dMonth?.response) ? dMonth.response : [];
 
-      // побудуємо мапу середнього чека за місяць
+      // карта user_id -> avg чек/міс
       const avgMap = {};
       for (const w of monthList) {
-        const revenueUAH = Number(w.revenue || 0) / 100; // копійки -> грн
+        const revenueUAH = Number(w.revenue || 0) / 100;
         const checks = Number(w.clients || 0);
         avgMap[w.user_id] = checks > 0 ? revenueUAH / checks : 0;
       }
 
+      const toMap = (obj) => {
+        const m = {};
+        for (const row of obj?.response || []) {
+          m[row.user_id] = row;
+        }
+        return m;
+      };
+
       setDaySales(dayList);
       setAvgPerMonthMap(avgMap);
+      setSaucesDay(toMap(dSauD));
+      setAddonsDay(toMap(dAddD));
+      setSaucesMonth(toMap(dSauM));
     } catch (e) {
       console.error(e);
       setError("Не вдалося завантажити дані. Перевір адресу API, токен або дату.");
@@ -76,36 +156,62 @@ export default function App() {
     }
   }
 
-  // завантаження при зміні дати
   useEffect(() => {
     load();
   }, [date]);
 
-  // автооновлення кожні 5 хвилин
   useEffect(() => {
-    const id = setInterval(() => {
-      load();
-    }, 5 * 60 * 1000);
+    const id = setInterval(load, 5 * 60 * 1000);
     return () => clearInterval(id);
   }, [date]);
 
-  // значок-стрілка біля "Середній чек за день"
   function TrendArrow({ dayAvg, monthAvg }) {
     if (monthAvg == null) return null;
     const delta = dayAvg - monthAvg;
-    const eps = 0.5; // поріг ~50 коп., щоб уникати миготіння
-    if (delta > eps) {
-      return <span className="ml-2 text-green-400 align-middle">▲</span>;
-    }
-    if (delta < -eps) {
-      return <span className="ml-2 text-red-400 align-middle">▼</span>;
-    }
-    return null; // рівні — без значка
+    const eps = 0.5;
+    if (delta > eps) return <span className="ml-2 text-green-400 align-middle">▲</span>;
+    if (delta < -eps) return <span className="ml-2 text-red-400 align-middle">▼</span>;
+    return null;
   }
+
+  const daysInMonth = daysInMonthOfDateStr(date);
+
+  // ====== ЛІДЕРБОРДИ (перерахунок) ======
+  const leaderboards = useMemo(() => {
+    // зберемо метрики по кожному співробітнику
+    const arr = daySales.map((w) => {
+      const uid = w.user_id;
+      const checks = Number(w.clients || 0);
+      const revenueUAH = Number(w.revenue || 0) / 100;
+      const avgDay = checks > 0 ? revenueUAH / checks : 0;
+      const avgMonth = avgPerMonthMap[uid] ?? 0;
+
+      const sauce = pickCatsSum({ [uid]: saucesDay[uid] }, uid, SAUCE_CAT_IDS);
+      const addon = pickCatsSum({ [uid]: addonsDay[uid] }, uid, ADDON_CAT_IDS);
+
+      const per20 = (qty) => (checks > 0 ? (qty / checks) * 20 : 0);
+
+      return {
+        uid,
+        name: w.name || "—",
+        role: ROLE_BY_USER[uid] || "waiter",
+        saucesPer20: per20(sauce.qty),
+        addonsPer20: per20(addon.qty),
+        avgDelta: avgDay - (avgMonth || 0),
+      };
+    });
+
+    const topSauces = [...arr].sort((a, b) => b.saucesPer20 - a.saucesPer20).slice(0, 3);
+    const topAddons = [...arr].sort((a, b) => b.addonsPer20 - a.addonsPer20).slice(0, 3);
+    const topAvgDelta = [...arr].sort((a, b) => b.avgDelta - a.avgDelta).slice(0, 3);
+
+    return { topSauces, topAddons, topAvgDelta };
+  }, [daySales, saucesDay, addonsDay, avgPerMonthMap]);
 
   return (
     <div className="min-h-screen bg-black text-white relative">
-      <div className="max-w-5xl mx-auto p-4 pb-16">
+      <div className="max-w-6xl mx-auto p-4 pb-20">
+        {/* ====== Хедер ====== */}
         <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
           <h1 className="text-2xl font-semibold">Зміна: продажі офіціантів (за день)</h1>
 
@@ -127,24 +233,118 @@ export default function App() {
           </div>
         </header>
 
+        {/* ====== ЛІДЕРБОРДИ ====== */}
+        <section className="mb-6">
+          <h2 className="text-lg font-semibold mb-3">Лідерборди (онлайн)</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Соуси на 20 чеків */}
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
+              <div className="text-sm text-neutral-400 mb-2">Соуси на 20 чеків</div>
+              <ol className="space-y-2">
+                {leaderboards.topSauces.map((p, idx) => (
+                  <li key={p.uid} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-neutral-500 w-5">{idx + 1}.</span>
+                      <span className="font-medium">{p.name}</span>
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-neutral-800 border border-neutral-700">
+                        {p.role === "bartender" ? "бармен" : "офіціант"}
+                      </span>
+                    </div>
+                    <div className="font-semibold">{Number(p.saucesPer20).toFixed(2)}</div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            {/* Допи на 20 чеків */}
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
+              <div className="text-sm text-neutral-400 mb-2">Допи на 20 чеків</div>
+              <ol className="space-y-2">
+                {leaderboards.topAddons.map((p, idx) => (
+                  <li key={p.uid} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-neutral-500 w-5">{idx + 1}.</span>
+                      <span className="font-medium">{p.name}</span>
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-neutral-800 border border-neutral-700">
+                        {p.role === "bartender" ? "бармен" : "офіціант"}
+                      </span>
+                    </div>
+                    <div className="font-semibold">{Number(p.addonsPer20).toFixed(2)}</div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            {/* Δ Середній чек (день – міс) */}
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
+              <div className="text-sm text-neutral-400 mb-2">Δ Середній чек (день – міс)</div>
+              <ol className="space-y-2">
+                {leaderboards.topAvgDelta.map((p, idx) => {
+                  const val = Number(p.avgDelta) || 0;
+                  const cls = val >= 0 ? "text-green-400" : "text-red-400";
+                  const sign = val >= 0 ? "+" : "–";
+                  return (
+                    <li key={p.uid} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-neutral-500 w-5">{idx + 1}.</span>
+                        <span className="font-medium">{p.name}</span>
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-neutral-800 border border-neutral-700">
+                          {p.role === "bartender" ? "бармен" : "офіціант"}
+                        </span>
+                      </div>
+                      <div className={`font-semibold ${cls}`}>
+                        {sign}
+                        {money(Math.abs(val))} ₴
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          </div>
+        </section>
+
+        {/* ====== КАРТКИ СПІВРОБІТНИКІВ ====== */}
         {loading && <div className="animate-pulse text-neutral-300">Завантаження…</div>}
         {error && <div className="text-red-400">{error}</div>}
 
         {!loading && !error && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {daySales.map((w) => {
-              const revenueUAH = Number(w.revenue || 0) / 100; // копійки -> грн
+              const uid = w.user_id;
+              const role = ROLE_BY_USER[uid] || "waiter"; // за замовчуванням офіціант
+              const revenueUAH = Number(w.revenue || 0) / 100;
               const checks = Number(w.clients || 0);
               const avgDay = checks > 0 ? revenueUAH / checks : 0;
+              const avgMonth = avgPerMonthMap[uid];
 
-              const avgMonth = avgPerMonthMap[w.user_id];
+              // соуси/допи — суми за день
+              const sDay = saucesDay[uid] || {};
+              const aDay = addonsDay[uid] || {};
+              const sauce = pickCatsSum({ [uid]: sDay }, uid, SAUCE_CAT_IDS);
+              const addon = pickCatsSum({ [uid]: aDay }, uid, ADDON_CAT_IDS);
+
+              // бонуси за день
+              const kSau = BONUS[role]?.sauce ?? 0;
+              const kAdd = BONUS[role]?.addon ?? 0;
+              const bonusSau = sauce.sum * kSau;
+              const bonusAdd = addon.sum * kAdd;
+              const bonusTotal = bonusSau + bonusAdd;
+
+              // стандарт по соусам (місяць / дні)
+              const sMonth = saucesMonth[uid] || {};
+              const sauceMonthQty = sMonth.total_qty ?? 0;
+              const sauceStdPerDay = daysInMonth > 0 ? sauceMonthQty / daysInMonth : 0;
 
               return (
-                <div key={w.user_id} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
+                <div key={uid} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-lg font-medium">{w.name || "—"}</div>
-                    <div className="text-xs text-neutral-500">ID {w.user_id}</div>
+                    <div className="text-xs text-neutral-500">
+                      ID {uid} · {role === "bartender" ? "бармен" : "офіціант"}
+                    </div>
                   </div>
+
                   <div className="space-y-1 text-sm">
                     <div>Виручка за день: {money(revenueUAH)} ₴</div>
                     <div>Кількість чеків за день: {intf(checks)}</div>
@@ -153,6 +353,25 @@ export default function App() {
                       <TrendArrow dayAvg={avgDay} monthAvg={avgMonth} />
                     </div>
                     <div>Середній чек/міс: {avgMonth != null ? `${money(avgMonth)} ₴` : "—"}</div>
+
+                    <div className="pt-2">
+                      <div>
+                        <span className="font-medium">Соуси</span> — {intf(sauce.qty)} шт / {money(sauce.sum)} ₴
+                      </div>
+                      <div className="text-neutral-400 text-xs">
+                        Стандарт соусів/день (міс): {sauceStdPerDay.toFixed(2)} шт
+                      </div>
+                      <div>
+                        <span className="font-medium">Допи</span> — {intf(addon.qty)} шт / {money(addon.sum)} ₴
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-neutral-800 mt-2">
+                      <div className="font-medium">Бонуси (день): {money(bonusTotal)} ₴</div>
+                      <div className="text-neutral-400 text-xs">
+                        з них: соуси {money(bonusSau)} ₴ · допи {money(bonusAdd)} ₴
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
@@ -164,7 +383,7 @@ export default function App() {
         )}
       </div>
 
-      {/* Логотип у правому нижньому куті (не перекладати) */}
+      {/* Лого — не перекладаємо */}
       <div className="fixed right-3 bottom-3 text-xs text-neutral-500/80 select-none">
         GRECO Tech ™
       </div>
