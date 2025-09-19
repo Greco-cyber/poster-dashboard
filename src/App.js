@@ -198,30 +198,30 @@ export default function App() {
             {/* Left Column: Compact Performance Ranking */}
             <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden">
               <div className="px-3 py-2 border-b border-gray-700">
-                <h2 className="font-semibold text-white text-xs">Рейтинг</h2>
-                <p className="text-gray-400 text-xs">Δ чек</p>
+                <h2 className="font-semibold text-white text-sm">Рейтинг</h2>
+                <p className="text-gray-400 text-sm">Δ чек</p>
               </div>
               <div className="divide-y divide-gray-700 overflow-y-auto h-full">
                 {avgDiff
                   .sort((a, b) => b.diff - a.diff)
                   .slice(0, 5)
                   .map((w, i) => (
-                    <div key={w.id} className="px-3 py-2">
+                    <div key={w.id} className="px-3 py-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-300 w-4">{i + 1}</span>
+                          <span className="text-sm font-semibold text-gray-300 w-4">{i + 1}</span>
                           <div className="min-w-0 flex-1">
-                            <p className="font-medium text-white text-xs truncate">{w.name}</p>
+                            <p className="font-medium text-white text-sm truncate">{w.name}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-1 ml-2">
-                          <span className={`text-xs font-semibold ${w.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          <span className={`text-sm font-semibold ${w.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {w.diff >= 0 ? '+' : ''}{money(w.diff)}₴
                           </span>
                           {w.diff >= 0 ? (
-                            <TrendingUp className="w-3 h-3 text-green-400" />
+                            <TrendingUp className="w-4 h-4 text-green-400" />
                           ) : (
-                            <TrendingDown className="w-3 h-3 text-red-400" />
+                            <TrendingDown className="w-4 h-4 text-red-400" />
                           )}
                         </div>
                       </div>
@@ -245,45 +245,45 @@ export default function App() {
                   return (
                     <div key={uid} className="bg-gray-800 rounded-lg border border-gray-700 p-3">
                       {/* Header - Name and Delta */}
-                      <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center justify-between mb-3">
                         <div>
-                          <h3 className="font-semibold text-white text-sm truncate">
+                          <h3 className="font-semibold text-white text-base truncate">
                             {w.name || "—"}
                           </h3>
-                          <p className="text-gray-400 text-xs">
+                          <p className="text-gray-400 text-sm">
                             {w.name?.toLowerCase().includes("бар") ? "Бармен" : "Офіціант"}
                           </p>
                         </div>
                         {avgMonth != null && (
                           <div className="flex items-center gap-1">
-                            <span className={`text-xs font-semibold ${diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            <span className={`text-sm font-semibold ${diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                               {diff >= 0 ? '+' : ''}{money(diff)}₴
                             </span>
                             {diff >= 0 ? (
-                              <TrendingUp className="w-3 h-3 text-green-400" />
+                              <TrendingUp className="w-4 h-4 text-green-400" />
                             ) : (
-                              <TrendingDown className="w-3 h-3 text-red-400" />
+                              <TrendingDown className="w-4 h-4 text-red-400" />
                             )}
                           </div>
                         )}
                       </div>
 
                       {/* Compact Stats - Single Row */}
-                      <div className="grid grid-cols-4 gap-2 text-xs">
+                      <div className="grid grid-cols-4 gap-2 text-sm">
                         <div className="text-center">
-                          <p className="text-gray-400 mb-1">Виручка</p>
+                          <p className="text-gray-400 mb-1 text-xs">Виручка</p>
                           <p className="font-bold text-white">{money(revenueUAH)}₴</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-gray-400 mb-1">Чеки</p>
+                          <p className="text-gray-400 mb-1 text-xs">Чеки</p>
                           <p className="font-bold text-white">{checks}</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-gray-400 mb-1">Серед</p>
+                          <p className="text-gray-400 mb-1 text-xs">Серед</p>
                           <p className="font-bold text-white">{money(avgDay)}₴</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-gray-400 mb-1">Міс</p>
+                          <p className="text-gray-400 mb-1 text-xs">Міс</p>
                           <p className="font-semibold text-gray-300">
                             {avgMonth != null ? `${money(avgMonth)}₴` : "—"}
                           </p>
