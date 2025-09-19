@@ -243,47 +243,49 @@ export default function App() {
                   const diff = avgDay - (avgMonth || 0);
 
                   return (
-                    <div key={uid} className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-4">
-                      <div className="flex items-center justify-between mb-3">
+                    <div key={uid} className="bg-gray-800 rounded-lg border border-gray-700 p-3">
+                      {/* Header - Name and Delta */}
+                      <div className="flex items-center justify-between mb-2">
                         <div>
-                          <h3 className="font-semibold text-white text-base">
+                          <h3 className="font-semibold text-white text-sm truncate">
                             {w.name || "—"}
                           </h3>
-                          <p className="text-gray-400 text-sm">
+                          <p className="text-gray-400 text-xs">
                             {w.name?.toLowerCase().includes("бар") ? "Бармен" : "Офіціант"}
                           </p>
                         </div>
                         {avgMonth != null && (
                           <div className="flex items-center gap-1">
-                            <span className={`text-sm font-semibold ${diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            <span className={`text-xs font-semibold ${diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                               {diff >= 0 ? '+' : ''}{money(diff)}₴
                             </span>
                             {diff >= 0 ? (
-                              <TrendingUp className="w-4 h-4 text-green-400" />
+                              <TrendingUp className="w-3 h-3 text-green-400" />
                             ) : (
-                              <TrendingDown className="w-4 h-4 text-red-400" />
+                              <TrendingDown className="w-3 h-3 text-red-400" />
                             )}
                           </div>
                         )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <p className="text-gray-400 font-medium mb-1">Виручка</p>
-                          <p className="font-bold text-white text-lg">{money(revenueUAH)} ₴</p>
+                      {/* Compact Stats - Single Row */}
+                      <div className="grid grid-cols-4 gap-2 text-xs">
+                        <div className="text-center">
+                          <p className="text-gray-400 mb-1">Виручка</p>
+                          <p className="font-bold text-white">{money(revenueUAH)}₴</p>
                         </div>
-                        <div>
-                          <p className="text-gray-400 font-medium mb-1">Чеки</p>
-                          <p className="font-bold text-white text-lg">{checks}</p>
+                        <div className="text-center">
+                          <p className="text-gray-400 mb-1">Чеки</p>
+                          <p className="font-bold text-white">{checks}</p>
                         </div>
-                        <div>
-                          <p className="text-gray-400 font-medium mb-1">Серед. чек</p>
-                          <p className="font-bold text-white text-lg">{money(avgDay)} ₴</p>
+                        <div className="text-center">
+                          <p className="text-gray-400 mb-1">Серед</p>
+                          <p className="font-bold text-white">{money(avgDay)}₴</p>
                         </div>
-                        <div>
-                          <p className="text-gray-400 font-medium mb-1">Серед/міс</p>
-                          <p className="font-semibold text-gray-300 text-base">
-                            {avgMonth != null ? `${money(avgMonth)} ₴` : "—"}
+                        <div className="text-center">
+                          <p className="text-gray-400 mb-1">Міс</p>
+                          <p className="font-semibold text-gray-300">
+                            {avgMonth != null ? `${money(avgMonth)}₴` : "—"}
                           </p>
                         </div>
                       </div>
