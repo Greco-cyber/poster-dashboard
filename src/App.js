@@ -215,7 +215,7 @@ export default function App() {
                           </div>
                         </div>
                         <div className="flex items-center gap-1 ml-2">
-                          <span className={`text-lg font-semibold ${w.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          <span className={`text-xl font-semibold ${w.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {w.diff >= 0 ? '+' : ''}{money(w.diff)}₴
                           </span>
                           {w.diff >= 0 ? (
@@ -256,7 +256,7 @@ export default function App() {
                         </div>
                         {avgMonth != null && (
                           <div className="flex items-center gap-1">
-                            <span className={`text-lg font-semibold ${diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            <span className={`text-xl font-semibold ${diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                               {diff >= 0 ? '+' : ''}{money(diff)}₴
                             </span>
                             {diff >= 0 ? (
@@ -269,7 +269,7 @@ export default function App() {
                       </div>
 
                       {/* Compact Stats - Single Row */}
-                      <div className="grid grid-cols-4 gap-2 text-lg">
+                      <div className="grid grid-cols-4 gap-2 text-xl">
                         <div className="text-center">
                           <p className="text-gray-400 mb-1 text-xs">Виручка</p>
                           <p className="font-bold text-white">{money(revenueUAH)}₴</p>
