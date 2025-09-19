@@ -193,37 +193,35 @@ export default function App() {
 
         {/* Main Content Grid */}
         {!loading && daySales.length > 0 && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 h-[calc(100vh-280px)]">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 h-[calc(100vh-280px)]">
             
-            {/* Left Column: Performance Ranking - Smaller */}
+            {/* Left Column: Compact Performance Ranking */}
             <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-700">
-                <h2 className="font-semibold text-white text-sm">Рейтинг ефективності</h2>
-                <p className="text-gray-400 text-xs">Δ середній чек (день - місяць)</p>
+              <div className="px-3 py-2 border-b border-gray-700">
+                <h2 className="font-semibold text-white text-xs">Рейтинг</h2>
+                <p className="text-gray-400 text-xs">Δ чек</p>
               </div>
               <div className="divide-y divide-gray-700 overflow-y-auto h-full">
                 {avgDiff
                   .sort((a, b) => b.diff - a.diff)
+                  .slice(0, 5)
                   .map((w, i) => (
-                    <div key={w.id} className="px-4 py-3 hover:bg-gray-750 transition-colors">
+                    <div key={w.id} className="px-3 py-2">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center">
-                            <span className="text-xs font-semibold text-gray-300">{i + 1}</span>
-                          </div>
-                          <div>
-                            <p className="font-medium text-white text-sm">{w.name}</p>
-                            <p className="text-xs text-gray-400">{w.role}</p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-gray-300 w-4">{i + 1}</span>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-white text-xs truncate">{w.name}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <span className={`text-sm font-semibold ${w.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {w.diff >= 0 ? '+' : ''}{money(w.diff)} ₴
+                        <div className="flex items-center gap-1 ml-2">
+                          <span className={`text-xs font-semibold ${w.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {w.diff >= 0 ? '+' : ''}{money(w.diff)}₴
                           </span>
                           {w.diff >= 0 ? (
-                            <TrendingUp className="w-4 h-4 text-green-400" />
+                            <TrendingUp className="w-3 h-3 text-green-400" />
                           ) : (
-                            <TrendingDown className="w-4 h-4 text-red-400" />
+                            <TrendingDown className="w-3 h-3 text-red-400" />
                           )}
                         </div>
                       </div>
@@ -232,8 +230,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right Columns: Employee Grid - Larger, More Readable */}
-            <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 overflow-y-auto h-full">
+            {/* Right Columns: Employee Grid - All Employees Visible */}
+            <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-4 overflow-y-auto h-full">
               {daySales
                 .sort((a, b) => (Number(b.revenue || 0) - Number(a.revenue || 0)))
                 .map((w) => {
