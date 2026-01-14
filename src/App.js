@@ -64,6 +64,7 @@ export default function App() {
         [183, 1],
         [182, 1],
         [317, 1],
+        [422, 1], // ✅ Додано
         // cat 47
         [529, 1],
         [530, 2],
@@ -232,7 +233,7 @@ export default function App() {
   const coffeeSplit = useMemo(() => {
     const by = coffee.by_product;
 
-    const cat34Set = new Set([230, 485, 307, 231, 316, 406, 183, 182, 317]);
+    const cat34Set = new Set([230, 485, 307, 231, 316, 406, 183, 182, 317, 422]); // ✅ Додано 422
     const cat47Set = new Set([529, 530, 533, 534, 535]);
 
     const sumForSet = (set) => {
