@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { TrendingUp, TrendingDown, Users, CreditCard, Clock, RefreshCw } from "lucide-react";
+import { Users, CreditCard, Clock, RefreshCw } from "lucide-react";
 
 const API_BASE = process.env.REACT_APP_API_BASE || "";
 
@@ -30,35 +30,71 @@ const money = (n) =>
     maximumFractionDigits: 0,
   });
 
+function safeText(s, fallback = "—") {
+  const v = String(s || "").trim();
+  return v ? v : fallback;
+}
+
 export default function App() {
   const today = useMemo(() => yyyymmdd(), []);
   const [date, setDate] = useState(today);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
   const [daySales, setDaySales] = useState([]);
   const [avgPerMonthMap, setAvgPerMonthMap] = useState({});
+
+  // BAR block state
+  const [barLoading, setBarLoading] = useState(false);
+  const [barError, setBarError] = useState("");
+  const [barData, setBarData] = useState(null);
+
+  // --- Coffee product sets for category split (robust even if backend category_id is missing)
+  const COFFEE_CAT_34 = useMemo(
+    () =>
+      new Set([
+        230, 485, 307, 231, 316, 406, 183, 182, 317, // cat 34
+      ]),
+    []
+  );
+  const COFFEE_CAT_47 = useMemo(
+    () =>
+      new Set([
+        529, 530, 533, 534, 535, // cat 47 (530 = 2 закладки)
+      ]),
+    []
+  );
+
+  async function fetchJsonOrThrow(url) {
+    const r = await fetch(url);
+    const t = await r.text();
+    if (!r.ok) throw new Error(t || `HTTP ${r.status}`);
+    return JSON.parse(t || "{}");
+  }
 
   async function loadAll() {
     setLoading(true);
     setError("");
+
+    // Бар не должен ломать весь экран — грузим отдельно и мягко
+    setBarLoading(true);
+    setBarError("");
+
     try {
       const mFrom = firstDayOfMonthStr(date);
       const mTo = lastDayOfMonthStr(date);
 
-      const rDay = await fetch(
+      // 1) Day waiters
+      const dDay = await fetchJsonOrThrow(
         `${API_BASE}/api/waiters-sales?dateFrom=${date}&dateTo=${date}`
       );
-      const tDay = await rDay.text();
-      if (!rDay.ok) throw new Error(tDay);
-      const dDay = JSON.parse(tDay || "{}");
       const dayList = Array.isArray(dDay?.response) ? dDay.response : [];
 
-      const rMonth = await fetch(
+      // 2) Month waiters (for avg check per month)
+      const dMonth = await fetchJsonOrThrow(
         `${API_BASE}/api/waiters-sales?dateFrom=${mFrom}&dateTo=${mTo}`
       );
-      const tMonth = await rMonth.text();
-      if (!rMonth.ok) throw new Error(tMonth);
-      const dMonth = JSON.parse(tMonth || "{}");
       const monthList = Array.isArray(dMonth?.response) ? dMonth.response : [];
 
       const avgMap = {};
@@ -76,47 +112,149 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+
+    // BAR fetch (separately)
+    try {
+      const dBar = await fetchJsonOrThrow(
+        `${API_BASE}/api/bar-sales?dateFrom=${date}&dateTo=${date}`
+      );
+
+      // Защита на фронте: принудительно фиксируем закладки (530 = 2)
+      const shotsOverride = new Map([
+        [230, 1],
+        [485, 1],
+        [307, 2],
+        [231, 1],
+        [316, 1],
+        [406, 1],
+        [183, 1],
+        [182, 1],
+        [317, 1],
+        [529, 1],
+        [530, 2], // ✅ фикс
+        [533, 1],
+        [534, 1],
+        [535, 1],
+      ]);
+
+      const patched = { ...dBar };
+      if (patched?.coffee && Array.isArray(patched.coffee.by_product)) {
+        let totalQty = 0;
+        let totalZak = 0;
+
+        const byProduct = patched.coffee.by_product.map((row) => {
+          const pid = Number(row.product_id);
+          const qty = Number(row.qty || 0);
+          const per = shotsOverride.has(pid)
+            ? shotsOverride.get(pid)
+            : Number(row.zakladki_per_unit || 0);
+          const zak = qty * per;
+          totalQty += qty;
+          totalZak += zak;
+          return {
+            ...row,
+            zakladki_per_unit: per,
+            zakladki_total: zak,
+          };
+        });
+
+        patched.coffee = {
+          ...patched.coffee,
+          total_qty: totalQty,
+          total_zakladki: totalZak,
+          by_product: byProduct.sort((a, b) => Number(b.qty || 0) - Number(a.qty || 0)),
+        };
+      }
+
+      setBarData(patched);
+    } catch (e) {
+      console.error(e);
+      setBarError("Не вдалося завантажити дані по бару.");
+      setBarData(null);
+    } finally {
+      setBarLoading(false);
+    }
   }
 
   useEffect(() => {
     loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
   useEffect(() => {
     const id = setInterval(loadAll, 5 * 60 * 1000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
   // Calculate totals
   const totals = useMemo(() => {
-    const totalRevenue = daySales.reduce((sum, w) => sum + (Number(w.revenue || 0) / 100), 0);
+    const totalRevenue = daySales.reduce(
+      (sum, w) => sum + Number(w.revenue || 0) / 100,
+      0
+    );
     const totalChecks = daySales.reduce((sum, w) => sum + Number(w.clients || 0), 0);
     const avgCheck = totalChecks > 0 ? totalRevenue / totalChecks : 0;
-    
+
     return { totalRevenue, totalChecks, avgCheck };
   }, [daySales]);
 
-  // лидерборд: Δ средний чек (день — міс)
-  const avgDiff = useMemo(() => {
-    return daySales.map((w) => {
-      const uid = w.user_id;
-      const revenueUAH = Number(w.revenue || 0) / 100;
-      const checks = Number(w.clients || 0);
-      const avgDay = checks > 0 ? revenueUAH / checks : 0;
-      const avgMonth = avgPerMonthMap[uid] ?? 0;
-      const diff = avgDay - avgMonth;
+  // BAR helpers
+  const barCats = useMemo(() => {
+    const arr = Array.isArray(barData?.categories) ? barData.categories : [];
+    const map = new Map(arr.map((x) => [Number(x.category_id), x]));
+    const pick = (id, nameFallback) => {
+      const v = map.get(id);
       return {
-        id: uid,
-        name: w.name,
-        role: w.name?.toLowerCase().includes("бар") ? "бармен" : "офіціант",
-        diff,
-        avgDay,
-        avgMonth,
-        revenue: revenueUAH,
-        checks
+        category_id: id,
+        name: safeText(v?.name, nameFallback),
+        qty: Number(v?.qty || 0),
+        sum_uah: Number(v?.sum_uah || 0),
       };
-    });
-  }, [daySales, avgPerMonthMap]);
+    };
+    return [
+      pick(9, "Категорія 9"),
+      pick(14, "Категорія 14"),
+      pick(34, "Кофе (кат.34)"),
+    ];
+  }, [barData]);
+
+  const coffee = useMemo(() => {
+    const c = barData?.coffee || {};
+    const by = Array.isArray(c.by_product) ? c.by_product : [];
+    return {
+      total_qty: Number(c.total_qty || 0),
+      total_zakladki: Number(c.total_zakladki || 0),
+      by_product: by,
+    };
+  }, [barData]);
+
+  // ✅ Separate totals: cat 34 vs cat 47 (using product_id sets as the source of truth)
+  const coffeeSplit = useMemo(() => {
+    const by = coffee.by_product || [];
+
+    const sumForSet = (set) => {
+      let qty = 0;
+      let zak = 0;
+      for (const row of by) {
+        const pid = Number(row.product_id);
+        if (!set.has(pid)) continue;
+        qty += Number(row.qty || 0);
+        zak += Number(row.zakladki_total || 0);
+      }
+      return { qty, zakladki: zak };
+    };
+
+    const c34 = sumForSet(COFFEE_CAT_34);
+    const c47 = sumForSet(COFFEE_CAT_47);
+
+    return {
+      cat34: c34,
+      cat47: c47,
+      // fallback: if by_product has unknown coffee ids in future, keep overall from backend
+      overall: { qty: coffee.total_qty, zakladki: coffee.total_zakladki },
+    };
+  }, [coffee.by_product, coffee.total_qty, coffee.total_zakladki, COFFEE_CAT_34, COFFEE_CAT_47]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -129,7 +267,7 @@ export default function App() {
                 <h1 className="text-xl font-bold text-white">Продажі</h1>
                 <p className="text-gray-400 text-xs">Звіт за день</p>
               </div>
-              
+
               {/* Date Picker - Inline */}
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-blue-400" />
@@ -141,14 +279,16 @@ export default function App() {
                 />
               </div>
             </div>
-            
+
             <button
               onClick={loadAll}
-              disabled={loading}
+              disabled={loading || barLoading}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-all"
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              {loading ? 'Оновлення...' : 'Оновити'}
+              <RefreshCw
+                className={`w-4 h-4 ${loading || barLoading ? "animate-spin" : ""}`}
+              />
+              {loading || barLoading ? "Оновлення..." : "Оновити"}
             </button>
           </div>
         </div>
@@ -162,6 +302,12 @@ export default function App() {
           </div>
         )}
 
+        {barError && (
+          <div className="bg-yellow-900 border border-yellow-700 rounded-xl p-3">
+            <p className="text-yellow-200 text-sm">{barError}</p>
+          </div>
+        )}
+
         {/* Summary Row */}
         {!loading && daySales.length > 0 && (
           <div className="grid grid-cols-3 gap-4">
@@ -170,7 +316,9 @@ export default function App() {
                 <CreditCard className="w-5 h-5 text-green-400" />
                 <span className="text-gray-300 text-sm font-medium">Виручка</span>
               </div>
-              <p className="text-2xl font-bold text-white">{money(totals.totalRevenue)} ₴</p>
+              <p className="text-2xl font-bold text-white">
+                {money(totals.totalRevenue)} ₴
+              </p>
             </div>
 
             <div className="bg-gray-800 rounded-xl p-4 shadow-lg border border-gray-700">
@@ -183,10 +331,12 @@ export default function App() {
 
             <div className="bg-gray-800 rounded-xl p-4 shadow-lg border border-gray-700">
               <div className="flex items-center gap-2 mb-2">
-                <TrendingUp className="w-5 h-5 text-purple-400" />
+                <CreditCard className="w-5 h-5 text-purple-400" />
                 <span className="text-gray-300 text-sm font-medium">Серед. чек</span>
               </div>
-              <p className="text-2xl font-bold text-white">{money(totals.avgCheck)} ₴</p>
+              <p className="text-2xl font-bold text-white">
+                {money(totals.avgCheck)} ₴
+              </p>
             </div>
           </div>
         )}
@@ -194,57 +344,154 @@ export default function App() {
         {/* Main Content Grid */}
         {!loading && daySales.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 h-[calc(100vh-280px)]">
-            
-            {/* Left Column: Compact Performance Ranking */}
-            <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden">
+            {/* Left Column: BAR */}
+            <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden flex flex-col">
               <div className="px-3 py-2 border-b border-gray-700">
-                <h2 className="font-semibold text-white text-sm">Рейтинг</h2>
-                <p className="text-gray-400 text-sm">Δ чек</p>
+                <h2 className="font-semibold text-white text-sm">Бар</h2>
+                <p className="text-gray-400 text-sm">Продажі по категоріям + закладки кофе</p>
               </div>
-              <div className="divide-y divide-gray-700 overflow-y-auto h-full">
-                {avgDiff
-                  .sort((a, b) => b.diff - a.diff)
-                  .slice(0, 5)
-                  .map((w, i) => (
-                    <div key={w.id} className="px-3 py-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-300 w-4">{i + 1}</span>
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium text-white text-sm truncate">{w.name}</p>
-                          </div>
+
+              <div className="p-3 space-y-4 overflow-y-auto">
+                {/* Categories 9/14/34 */}
+                <div className="bg-gray-900/40 border border-gray-700 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-semibold text-white">Категорії (за день)</p>
+                    <span className="text-xs text-gray-400">{dateInputValue(date)}</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {barCats.map((c) => (
+                      <div
+                        key={c.category_id}
+                        className="flex items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm text-gray-200 truncate">
+                            {c.name} <span className="text-gray-500">#{c.category_id}</span>
+                          </p>
                         </div>
-                        <div className="flex items-center gap-1 ml-2">
-                          <span className={`text-xl font-semibold ${w.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {w.diff >= 0 ? '+' : ''}{money(w.diff)}₴
-                          </span>
-                          {w.diff >= 0 ? (
-                            <TrendingUp className="w-4 h-4 text-green-400" />
-                          ) : (
-                            <TrendingDown className="w-4 h-4 text-red-400" />
-                          )}
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-white">{c.qty} шт</p>
+                          <p className="text-xs text-gray-400">{money(c.sum_uah)} ₴</p>
                         </div>
                       </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Coffee shots */}
+                <div className="bg-gray-900/40 border border-gray-700 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-semibold text-white">Кофе: закладки</p>
+                    <span className="text-xs text-gray-400">кат. 34 + 47</span>
+                  </div>
+
+                  {/* ✅ Split totals rows */}
+                  <div className="space-y-2 mb-3">
+                    <div className="bg-gray-800/60 border border-gray-700 rounded-lg p-2 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-gray-400">Кофе</p>
+                        <p className="text-sm font-semibold text-white">Категорія 34</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-white">{coffeeSplit.cat34.qty} шт</p>
+                        <p className="text-xs text-gray-300">
+                          {coffeeSplit.cat34.zakladki} закл
+                        </p>
+                      </div>
                     </div>
-                  ))}
+
+                    <div className="bg-gray-800/60 border border-gray-700 rounded-lg p-2 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-gray-400">Кофе штат</p>
+                        <p className="text-sm font-semibold text-white">Категорія 47</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-white">{coffeeSplit.cat47.qty} шт</p>
+                        <p className="text-xs text-gray-300">
+                          {coffeeSplit.cat47.zakladki} закл
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-800/60 border border-gray-700 rounded-lg p-2 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-gray-400">Разом</p>
+                        <p className="text-sm font-semibold text-white">Всього</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-white">{coffeeSplit.overall.qty} шт</p>
+                        <p className="text-xs text-gray-300">
+                          {coffeeSplit.overall.zakladki} закл
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Table by product */}
+                  <div className="space-y-2">
+                    {coffee.by_product.length === 0 && (
+                      <p className="text-sm text-gray-400">Немає продажів по кофе.</p>
+                    )}
+
+                    {coffee.by_product.map((p) => (
+                      <div
+                        key={p.product_id}
+                        className="bg-gray-800/60 border border-gray-700 rounded-lg p-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white truncate">
+                              {safeText(p.name, "Товар")}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              ID {p.product_id}
+                              {p.category_id != null ? ` • cat ${p.category_id}` : ""}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-white">{Number(p.qty || 0)} шт</p>
+                            <p className="text-xs text-gray-300">
+                              {Number(p.zakladki_total || 0)} закл{" "}
+                              <span className="text-gray-500">
+                                ({Number(p.zakladki_per_unit || 0)}/шт)
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Warnings from backend (if any) */}
+                  {Array.isArray(barData?.warnings) && barData.warnings.length > 0 && (
+                    <div className="mt-3 bg-yellow-900/30 border border-yellow-700 rounded-lg p-2">
+                      <p className="text-xs text-yellow-200 font-semibold mb-1">Увага:</p>
+                      <ul className="text-xs text-yellow-200 space-y-1 list-disc pl-4">
+                        {barData.warnings.map((w, idx) => (
+                          <li key={idx}>{w}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* Right Columns: Employee Grid - All Employees Visible */}
             <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-4 overflow-y-auto h-full">
               {daySales
-                .sort((a, b) => (Number(b.revenue || 0) - Number(a.revenue || 0)))
+                .sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))
                 .map((w) => {
                   const uid = w.user_id;
                   const revenueUAH = Number(w.revenue || 0) / 100;
                   const checks = Number(w.clients || 0);
                   const avgDay = checks > 0 ? revenueUAH / checks : 0;
                   const avgMonth = avgPerMonthMap[uid];
-                  const diff = avgDay - (avgMonth || 0);
 
                   return (
                     <div key={uid} className="bg-gray-800 rounded-lg border border-gray-700 p-3">
-                      {/* Header - Name and Delta */}
+                      {/* Header - Name */}
                       <div className="flex items-center justify-between mb-3">
                         <div>
                           <h3 className="font-semibold text-white text-base truncate">
@@ -254,18 +501,6 @@ export default function App() {
                             {w.name?.toLowerCase().includes("бар") ? "Бармен" : "Офіціант"}
                           </p>
                         </div>
-                        {avgMonth != null && (
-                          <div className="flex items-center gap-1">
-                            <span className={`text-xl font-semibold ${diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                              {diff >= 0 ? '+' : ''}{money(diff)}₴
-                            </span>
-                            {diff >= 0 ? (
-                              <TrendingUp className="w-4 h-4 text-green-400" />
-                            ) : (
-                              <TrendingDown className="w-4 h-4 text-red-400" />
-                            )}
-                          </div>
-                        )}
                       </div>
 
                       {/* Compact Stats - Single Row */}
@@ -297,10 +532,13 @@ export default function App() {
         )}
 
         {/* Loading State - Dark Theme */}
-        {loading && (
+        {(loading || barLoading) && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="bg-gray-800 rounded-xl p-4 shadow-lg border border-gray-700">
+              <div
+                key={i}
+                className="bg-gray-800 rounded-xl p-4 shadow-lg border border-gray-700"
+              >
                 <div className="animate-pulse">
                   <div className="flex items-center justify-between mb-3">
                     <div className="space-y-2">
