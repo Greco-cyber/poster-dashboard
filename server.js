@@ -2,15 +2,28 @@
 const express = require("express");
 const cors = require("cors");
 
-// Node 18/20 has global fetch; for safety on older Node можно будет подключить node-fetch,
-// но тебе теперь мы фиксируем Node 20.x, так что fetch есть.
-const fetchFn = global.fetch;
-
 const app = express();
 app.use(cors());
 
-const POSTER_BASE = "https://joinposter.com/api";
-const TOKEN = process.env.POSTER_TOKEN;
+const fetchFn = global.fetch;
+
+// Берем значения либо из нормальных переменных, либо из REACT_APP_* (как у тебя сейчас в Render)
+const TOKEN =
+  process.env.POSTER_TOKEN ||
+  process.env.REACT_APP_POSTER_TOKEN ||
+  "";
+
+const ACCOUNT =
+  process.env.POSTER_ACCOUNT ||
+  process.env.REACT_APP_POSTER_ACCOUNT ||
+  "";
+
+// Если POSTER_BASE_URL не задан, пробуем собрать его из ACCOUNT.
+// В Poster часто используется https://{account}.joinposter.com/api
+const POSTER_BASE =
+  process.env.POSTER_BASE_URL ||
+  process.env.REACT_APP_POSTER_BASE_URL ||
+  (ACCOUNT ? `https://${ACCOUNT}.joinposter.com/api` : "https://joinposter.com/api");
 
 function todayYYYYMMDD() {
   const d = new Date();
@@ -27,27 +40,67 @@ async function poster(method, params = {}) {
 
   const r = await fetchFn(url.toString());
   const t = await r.text();
-  let j = {};
+
+  let j;
   try {
     j = JSON.parse(t);
   } catch {
     j = { raw: t };
   }
+
   if (!r.ok) throw new Error(`${method} HTTP ${r.status}: ${t.slice(0, 400)}`);
   return j;
 }
 
-// -------------------- КЭШ ПРОДУКТОВ --------------------
-let PRODUCT_INFO = new Map(); // product_id -> { category_id, name }
-let PRODUCT_CACHE_AT = 0;
+// -------------------- КЭШ: категории --------------------
+let CATS_CACHE_AT = 0;
+let CAT_NAME = new Map(); // cid -> name
+const CATS_TTL_MS = 30 * 60 * 1000;
+
+async function ensureCategories() {
+  const now = Date.now();
+  if (CAT_NAME.size && now - CATS_CACHE_AT < CATS_TTL_MS) return;
+
+  // Самый типичный метод в Poster
+  const candidates = ["menu.getCategories"];
+
+  for (const m of candidates) {
+    try {
+      const j = await poster(m);
+      const arr = Array.isArray(j?.response) ? j.response : [];
+      if (!arr.length) continue;
+
+      const map = new Map();
+      for (const c of arr) {
+        const cid = Number(c.category_id ?? c.id ?? c.menu_category_id);
+        const name = String(c.category_name ?? c.name ?? "");
+        if (Number.isFinite(cid)) map.set(cid, name);
+      }
+
+      if (map.size) {
+        CAT_NAME = map;
+        CATS_CACHE_AT = now;
+        return;
+      }
+    } catch {
+      // try next (если добавишь варианты)
+    }
+  }
+
+  // если не удалось — оставим пустым, названия будем подставлять fallback'ом
+}
+
+// -------------------- КЭШ: продукты --------------------
+let PRODUCTS_CACHE_AT = 0;
+let PRODUCT_INFO = new Map(); // pid -> { name, category_id }
 const PRODUCT_TTL_MS = 15 * 60 * 1000;
 
-async function ensureProductsInfo() {
+async function ensureProducts() {
   const now = Date.now();
-  if (PRODUCT_INFO.size && now - PRODUCT_CACHE_AT < PRODUCT_TTL_MS) return;
+  if (PRODUCT_INFO.size && now - PRODUCTS_CACHE_AT < PRODUCT_TTL_MS) return;
 
-  const list = await poster("menu.getProducts");
-  const arr = Array.isArray(list?.response) ? list.response : [];
+  const j = await poster("menu.getProducts");
+  const arr = Array.isArray(j?.response) ? j.response : [];
 
   const map = new Map();
   for (const p of arr) {
@@ -55,80 +108,20 @@ async function ensureProductsInfo() {
     const cid = Number(p.menu_category_id ?? p.category_id ?? p.group_id ?? p.category);
     const name = String(p.product_name ?? p.name ?? "");
     if (Number.isFinite(pid)) {
-      map.set(pid, { category_id: Number.isFinite(cid) ? cid : null, name });
+      map.set(pid, { name, category_id: Number.isFinite(cid) ? cid : null });
     }
   }
 
   PRODUCT_INFO = map;
-  PRODUCT_CACHE_AT = now;
+  PRODUCTS_CACHE_AT = now;
 }
 
-// -------------------- утилиты чеков --------------------
-function pickPositions(tr) {
-  return (
-    tr.receipt_positions ??
-    tr.positions ??
-    tr.products ??
-    tr.items ??
-    tr.menu ??
-    tr.goods ??
-    tr.receipt_goods ??
-    []
-  );
-}
-
-function flattenPositions(basePositions) {
-  const out = [];
-  const stack = Array.isArray(basePositions) ? [...basePositions] : [];
-  while (stack.length) {
-    const p = stack.shift();
-    out.push(p);
-    for (const k of [
-      "modifiers",
-      "modifications",
-      "ingredients",
-      "additives",
-      "additionals",
-      "children",
-      "extras",
-    ]) {
-      if (Array.isArray(p?.[k]) && p[k].length) stack.push(...p[k]);
-    }
-  }
-  return out;
-}
-
-const pickQty = (p) => Number(p.count ?? p.quantity ?? p.qty ?? 0) || 0;
-
-const resolveProductId = (p) =>
-  Number(p.product_id ?? p.menu_id ?? p.id ?? p.good_id ?? p.dish_id ?? p.product ?? p.item_id);
-
-async function fetchTransactionsWithPositions({ dateFrom, dateTo }) {
-  const methods = [
-    { m: "transactions.getTransactions", p: { include: "products,receipt_positions" } },
-    { m: "transactions.getTransactions", p: { expand: "positions" } },
-    { m: "dash.getTransactions", p: { include: "products,receipt_positions" } },
-    { m: "dash.getTransactions", p: { expand: "positions" } },
-  ];
-
-  for (const cand of methods) {
-    try {
-      const j = await poster(cand.m, { dateFrom, dateTo, ...cand.p });
-      const arr =
-        [j?.response, j?.response?.transactions, j?.transactions, j?.data].find(Array.isArray) || [];
-      if (arr.length) return { checks: arr, used: cand };
-    } catch {
-      // next
-    }
-  }
-  return { checks: null, used: null };
-}
-
-// -------------------- базовый отчёт по официантам --------------------
+// -------------------- WAITERS --------------------
 app.get("/api/waiters-sales", async (req, res) => {
   try {
-    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
-    const { dateFrom = todayYYYYMMDD(), dateTo } = req.query;
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN (or REACT_APP_POSTER_TOKEN) is not set" });
+
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
     const data = await poster("dash.getWaitersSales", { dateFrom, dateTo });
     res.json(data);
   } catch (e) {
@@ -137,38 +130,98 @@ app.get("/api/waiters-sales", async (req, res) => {
   }
 });
 
-// -------------------- БАР: категории 9/14/34 + кофе (закладки) --------------------
+// -------------------- ПРОДАЖИ ПО ТОВАРАМ (для кофе) --------------------
+async function fetchProductsSales({ dateFrom, dateTo }) {
+  // На разных аккаунтах Poster может отличаться метод/структура.
+  // Пробуем несколько вариантов.
+  const methods = [
+    { m: "dash.getProductsSales", p: { dateFrom, dateTo } },
+    { m: "dash.getProductsSales", p: {} },
+    { m: "report.getProductsSales", p: { dateFrom, dateTo } },
+    { m: "report.getProductsSales", p: {} },
+    { m: "dash.getProducts", p: { dateFrom, dateTo } },
+    { m: "dash.getProducts", p: {} },
+  ];
+
+  for (const cand of methods) {
+    try {
+      const j = await poster(cand.m, cand.p);
+
+      const arr =
+        [j?.response, j?.response?.products, j?.products, j?.data].find(Array.isArray) || [];
+
+      if (!arr.length) continue;
+
+      const norm = arr
+        .map((x) => {
+          const product_id = Number(x.product_id ?? x.menu_id ?? x.id ?? x.good_id);
+          if (!Number.isFinite(product_id)) return null;
+
+          const name = String(x.product_name ?? x.name ?? "");
+          const qty = Number(x.count ?? x.quantity ?? x.qty ?? x.amount ?? 0) || 0;
+
+          return { product_id, name, qty };
+        })
+        .filter(Boolean);
+
+      if (norm.length) return { items: norm, used: cand };
+    } catch {
+      // next
+    }
+  }
+
+  return { items: null, used: null };
+}
+
+// -------------------- BAR SALES --------------------
 app.get("/api/bar-sales", async (req, res) => {
   try {
-    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN (or REACT_APP_POSTER_TOKEN) is not set" });
 
     const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
 
-    // 1) Категории бара: 9,14,34 (qty + sum)
+    // 1) Категории 9/14/34: количество (название берем из menu.getCategories)
     const BAR_CATS = [9, 14, 34];
-    const wantCats = new Set(BAR_CATS);
+    const want = new Set(BAR_CATS);
 
-    let categories = [];
+    await ensureCategories();
+
+    let categories = BAR_CATS.map((cid) => ({
+      category_id: cid,
+      name: CAT_NAME.get(cid) || `Категорія ${cid}`,
+      qty: 0,
+    }));
+
     try {
       const cats = await poster("dash.getCategoriesSales", { dateFrom, dateTo });
       const resp = Array.isArray(cats?.response) ? cats.response : [];
-      categories = resp
-        .filter((x) => wantCats.has(Number(x.category_id)))
-        .map((x) => ({
-          category_id: Number(x.category_id),
-          name: String(x.category_name || ""), // фронт игнорит имя, но оставим
-          qty: Number(x.count || 0),
-          sum_uah: Math.round(Number(x.revenue || 0)) / 100,
-        }))
-        .sort((a, b) => a.category_id - b.category_id);
+
+      const map = new Map();
+      for (const x of resp) {
+        const cid = Number(x.category_id);
+        if (!want.has(cid)) continue;
+
+        // иногда в ответе есть category_name, иногда нет
+        const nameFromDash = String(x.category_name ?? x.name ?? "");
+        const name = CAT_NAME.get(cid) || nameFromDash || `Категорія ${cid}`;
+
+        map.set(cid, {
+          category_id: cid,
+          name,
+          qty: Number(x.count ?? x.qty ?? 0),
+        });
+      }
+
+      categories = BAR_CATS.map((cid) => map.get(cid) || {
+        category_id: cid,
+        name: CAT_NAME.get(cid) || `Категорія ${cid}`,
+        qty: 0,
+      });
     } catch {
-      categories = [];
+      // оставляем нули
     }
 
-    // 2) Кофе: закладки по продуктам (кат.34 + кат.47)
-    await ensureProductsInfo();
-
-    // ВАЖНО: 530 = 2 ✅
+    // 2) Кофе: закладки по продуктам (кат.34 + кат.47), 530 = 2
     const shotsPerProduct = new Map([
       // cat 34
       [230, 1],
@@ -182,52 +235,43 @@ app.get("/api/bar-sales", async (req, res) => {
       [317, 1],
       // cat 47
       [529, 1],
-      [530, 2],
+      [530, 2], // ✅
       [533, 1],
       [534, 1],
       [535, 1],
     ]);
 
-    const { checks, used } = await fetchTransactionsWithPositions({ dateFrom, dateTo });
+    await ensureProducts();
 
-    const byProduct = new Map();
+    let byProduct = new Map();
     let totalQty = 0;
-    let totalZakladki = 0;
+    let totalZak = 0;
 
-    if (checks) {
-      for (const tr of checks) {
-        const flat = flattenPositions(pickPositions(tr));
-        for (const pos of flat) {
-          const pid = resolveProductId(pos);
-          if (!Number.isFinite(pid)) continue;
-          if (!shotsPerProduct.has(pid)) continue;
+    const prodSales = await fetchProductsSales({ dateFrom, dateTo });
 
-          const qty = pickQty(pos);
-          if (!qty) continue;
+    if (prodSales.items) {
+      for (const it of prodSales.items) {
+        const pid = Number(it.product_id);
+        if (!shotsPerProduct.has(pid)) continue;
 
-          const per = shotsPerProduct.get(pid) || 0;
-          const zak = qty * per;
+        const qty = Number(it.qty || 0);
+        if (!qty) continue;
 
-          totalQty += qty;
-          totalZakladki += zak;
+        const per = shotsPerProduct.get(pid);
+        const zak = qty * per;
 
-          const info = PRODUCT_INFO.get(pid) || {};
-          const catId = Number.isFinite(info.category_id) ? info.category_id : null;
+        totalQty += qty;
+        totalZak += zak;
 
-          if (!byProduct.has(pid)) {
-            byProduct.set(pid, {
-              product_id: pid,
-              name: info.name || "",
-              category_id: catId,
-              qty: 0,
-              zakladki_per_unit: per,
-              zakladki_total: 0,
-            });
-          }
-          const row = byProduct.get(pid);
-          row.qty += qty;
-          row.zakladki_total += zak;
-        }
+        const info = PRODUCT_INFO.get(pid) || {};
+        byProduct.set(pid, {
+          product_id: pid,
+          name: info.name || it.name || "",
+          category_id: info.category_id ?? null,
+          qty,
+          zakladki_per_unit: per,
+          zakladki_total: zak,
+        });
       }
     }
 
@@ -237,10 +281,10 @@ app.get("/api/bar-sales", async (req, res) => {
       categories,
       coffee: {
         total_qty: totalQty,
-        total_zakladki: totalZakladki,
+        total_zakladki: totalZak,
         by_product: [...byProduct.values()].sort((a, b) => b.qty - a.qty),
       },
-      debug: { usedTransactions: used },
+      debug: { usedProductsSales: prodSales.used || null },
     });
   } catch (e) {
     console.error(e);
