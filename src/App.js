@@ -66,7 +66,7 @@ export default function App() {
         [317, 1],
         // cat 47
         [529, 1],
-        [530, 2], // ✅
+        [530, 2],
         [533, 1],
         [534, 1],
         [535, 1],
@@ -206,15 +206,15 @@ export default function App() {
       const v = map.get(id);
       return {
         category_id: id,
-        name: safeText(v?.name, fallback),
+        name: fallback, // Використовуємо фіксовані назви
         qty: Number(v?.qty || 0),
       };
     };
 
     return [
-      pick(9, "Категорія 9"),
-      pick(14, "Категорія 14"),
-      pick(34, "Кофе"),
+      pick(9, "Пиво"),
+      pick(14, "Холодні напої"),
+      pick(34, "Кава"),
     ];
   }, [barData]);
 
@@ -344,92 +344,121 @@ export default function App() {
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 h-[calc(100vh-280px)]">
             {/* LEFT: Bar */}
             <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden flex flex-col">
-              <div className="px-3 py-2 border-b border-gray-700">
-                <h2 className="font-semibold text-white text-sm">Бар</h2>
-                <p className="text-gray-400 text-sm">
-                  Продажі по категоріям + закладки кофе
+              <div className="px-4 py-3 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-750">
+                <h2 className="font-bold text-white text-lg">🍺 Бар</h2>
+                <p className="text-gray-400 text-xs mt-0.5">
+                  Продажі за {dateInputValue(date)}
                 </p>
               </div>
 
-              <div className="p-3 space-y-4 overflow-y-auto">
+              <div className="p-4 space-y-4 overflow-y-auto">
                 {/* Categories */}
-                <div className="bg-gray-900/40 border border-gray-700 rounded-lg p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-semibold text-white">Категорії (за день)</p>
-                    <span className="text-xs text-gray-400">{dateInputValue(date)}</span>
-                  </div>
-
+                <div className="space-y-3">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    Категорії напоїв
+                  </h3>
+                  
                   <div className="space-y-2">
-                    {barCats.map((c) => (
+                    {barCats.map((c, idx) => (
                       <div
                         key={c.category_id}
-                        className="flex items-center justify-between gap-3"
+                        className="bg-gray-900/50 hover:bg-gray-900/70 transition-colors border border-gray-700 rounded-lg p-3"
                       >
-                        <div className="min-w-0">
-                          <p className="text-sm text-gray-200 truncate">
-                            {c.name}{" "}
-                            <span className="text-gray-500">#{c.category_id}</span>
-                          </p>
-                        </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${
+                              idx === 0 ? 'bg-amber-400' : 
+                              idx === 1 ? 'bg-blue-400' : 
+                              'bg-orange-400'
+                            }`} />
+                            <p className="text-sm font-medium text-white">
+                              {c.name}
+                            </p>
+                          </div>
 
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-white">{c.qty} шт</p>
+                          <div className="text-right">
+                            <p className="text-lg font-bold text-white">{c.qty}</p>
+                            <p className="text-xs text-gray-400">шт</p>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Coffee shots: ONLY TOTALS (no list below) */}
-                <div className="bg-gray-900/40 border border-gray-700 rounded-lg p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-semibold text-white">Кофе: закладки</p>
-                    <span className="text-xs text-gray-400">кат. 34 + 47</span>
-                  </div>
+                {/* Coffee shots */}
+                <div className="pt-3 border-t border-gray-700">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                    ☕ Закладки кави
+                  </h3>
 
                   <div className="space-y-2">
-                    <div className="bg-gray-800/60 border border-gray-700 rounded-lg p-2 flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-400">Кофе</p>
-                        <p className="text-sm font-semibold text-white">Категорія 34</p>
+                    <div className="bg-gradient-to-br from-orange-900/30 to-orange-800/20 border border-orange-700/50 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="text-xs text-orange-300/80 font-medium">Зал</p>
+                          <p className="text-sm font-semibold text-white">Кава в залі</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-bold text-white">
+                            {coffeeSplit.cat34.qty}
+                          </p>
+                          <p className="text-xs text-orange-200">шт</p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-white">
-                          {coffeeSplit.cat34.qty} шт
-                        </p>
-                        <p className="text-xs text-gray-300">
-                          {coffeeSplit.cat34.zakladki} закл
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="bg-gray-800/60 border border-gray-700 rounded-lg p-2 flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-400">Кофе штат</p>
-                        <p className="text-sm font-semibold text-white">Категорія 47</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-white">
-                          {coffeeSplit.cat47.qty} шт
-                        </p>
-                        <p className="text-xs text-gray-300">
-                          {coffeeSplit.cat47.zakladki} закл
-                        </p>
+                      <div className="pt-2 border-t border-orange-700/30">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs text-orange-300/70">Закладок:</span>
+                          <span className="text-sm font-bold text-orange-200">
+                            {coffeeSplit.cat34.zakladki}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="bg-gray-800/60 border border-gray-700 rounded-lg p-2 flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-400">Разом</p>
-                        <p className="text-sm font-semibold text-white">Всього</p>
+                    <div className="bg-gradient-to-br from-amber-900/30 to-amber-800/20 border border-amber-700/50 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="text-xs text-amber-300/80 font-medium">Персонал</p>
+                          <p className="text-sm font-semibold text-white">Кава штат</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-bold text-white">
+                            {coffeeSplit.cat47.qty}
+                          </p>
+                          <p className="text-xs text-amber-200">шт</p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-white">
-                          {coffeeSplit.overall.qty} шт
-                        </p>
-                        <p className="text-xs text-gray-300">
-                          {coffeeSplit.overall.zakladki} закл
-                        </p>
+                      <div className="pt-2 border-t border-amber-700/30">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs text-amber-300/70">Закладок:</span>
+                          <span className="text-sm font-bold text-amber-200">
+                            {coffeeSplit.cat47.zakladki}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-gray-800 to-gray-750 border-2 border-orange-600/50 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="text-xs text-orange-400 font-medium">Разом</p>
+                          <p className="text-base font-bold text-white">Всього кави</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-orange-400">
+                            {coffeeSplit.overall.qty}
+                          </p>
+                          <p className="text-xs text-gray-300">шт</p>
+                        </div>
+                      </div>
+                      <div className="pt-2 border-t border-orange-600/30">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs text-gray-300">Закладок:</span>
+                          <span className="text-lg font-bold text-orange-400">
+                            {coffeeSplit.overall.zakladki}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
