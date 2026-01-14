@@ -224,7 +224,6 @@ export default function App() {
     return [
       pick(9, "Пиво"),
       pick(14, "Холодні напої"),
-      pick(34, "Кава"),
     ];
   }, [barData]);
 
