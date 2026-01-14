@@ -51,14 +51,6 @@ export default function App() {
   const [barError, setBarError] = useState("");
   const [barData, setBarData] = useState(null);
 
-  // Coffee product sets (for split totals)
-  const COFFEE_CAT_34 = useMemo(
-    () => new Set([230, 485, 307, 231, 316, 406, 183, 182, 317]),
-    []
-  );
-  const COFFEE_CAT_47 = useMemo(() => new Set([529, 530, 533, 534, 535]), []);
-
-  // Extra safety on frontend: 530 = 2
   const shotsOverride = useMemo(
     () =>
       new Map([
@@ -205,7 +197,7 @@ export default function App() {
     return { totalRevenue, totalChecks, avgCheck };
   }, [daySales]);
 
-  // BAR categories (names from Poster should come from backend)
+  // BAR categories
   const barCats = useMemo(() => {
     const arr = Array.isArray(barData?.categories) ? barData.categories : [];
     const map = new Map(arr.map((x) => [Number(x.category_id), x]));
@@ -226,20 +218,22 @@ export default function App() {
     ];
   }, [barData]);
 
-  // Coffee data
+  // Coffee
   const coffee = useMemo(() => {
     const c = barData?.coffee || {};
-    const by = Array.isArray(c.by_product) ? c.by_product : [];
     return {
       total_qty: Number(c.total_qty || 0),
       total_zakladki: Number(c.total_zakladki || 0),
-      by_product: by,
+      by_product: Array.isArray(c.by_product) ? c.by_product : [],
     };
   }, [barData]);
 
-  // Split totals by product sets
+  // Split totals by categories using product_id mapping (robust)
   const coffeeSplit = useMemo(() => {
-    const by = coffee.by_product || [];
+    const by = coffee.by_product;
+
+    const cat34Set = new Set([230, 485, 307, 231, 316, 406, 183, 182, 317]);
+    const cat47Set = new Set([529, 530, 533, 534, 535]);
 
     const sumForSet = (set) => {
       let qty = 0;
@@ -254,17 +248,11 @@ export default function App() {
     };
 
     return {
-      cat34: sumForSet(COFFEE_CAT_34),
-      cat47: sumForSet(COFFEE_CAT_47),
+      cat34: sumForSet(cat34Set),
+      cat47: sumForSet(cat47Set),
       overall: { qty: coffee.total_qty, zakladki: coffee.total_zakladki },
     };
-  }, [
-    coffee.by_product,
-    coffee.total_qty,
-    coffee.total_zakladki,
-    COFFEE_CAT_34,
-    COFFEE_CAT_47,
-  ]);
+  }, [coffee.by_product, coffee.total_qty, coffee.total_zakladki]);
 
   const showMain = !loading && daySales.length > 0;
 
@@ -306,7 +294,6 @@ export default function App() {
       </div>
 
       <div className="max-w-7xl mx-auto p-4 space-y-4">
-        {/* Errors */}
         {error && (
           <div className="bg-red-900 border border-red-700 rounded-xl p-3">
             <p className="text-red-200 text-sm">{error}</p>
@@ -385,7 +372,6 @@ export default function App() {
                           </p>
                         </div>
 
-                        {/* ✅ только количество, без сумм */}
                         <div className="text-right">
                           <p className="text-sm font-bold text-white">{c.qty} шт</p>
                         </div>
@@ -394,15 +380,14 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Coffee shots */}
+                {/* Coffee shots: ONLY TOTALS (no list below) */}
                 <div className="bg-gray-900/40 border border-gray-700 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm font-semibold text-white">Кофе: закладки</p>
                     <span className="text-xs text-gray-400">кат. 34 + 47</span>
                   </div>
 
-                  {/* Split totals rows */}
-                  <div className="space-y-2 mb-3">
+                  <div className="space-y-2">
                     <div className="bg-gray-800/60 border border-gray-700 rounded-lg p-2 flex items-center justify-between">
                       <div>
                         <p className="text-xs text-gray-400">Кофе</p>
@@ -448,60 +433,6 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-
-                  {/* By product list */}
-                  <div className="space-y-2">
-                    {coffee.by_product.length === 0 && (
-                      <p className="text-sm text-gray-400">Немає продажів по кофе.</p>
-                    )}
-
-                    {coffee.by_product.map((p) => {
-                      const pid = Number(p.product_id);
-                      const group = COFFEE_CAT_34.has(pid)
-                        ? "Кофе (34)"
-                        : COFFEE_CAT_47.has(pid)
-                        ? "Кофе штат (47)"
-                        : "";
-
-                      return (
-                        <div
-                          key={p.product_id}
-                          className="bg-gray-800/60 border border-gray-700 rounded-lg p-2"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-white truncate">
-                                {safeText(p.name, "Товар")}
-                              </p>
-                              <p className="text-xs text-gray-400">
-                                ID {p.product_id}
-                                {group ? ` • ${group}` : ""}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm font-bold text-white">
-                                {Number(p.qty || 0)} шт
-                              </p>
-                              <p className="text-xs text-gray-300">
-                                {Number(p.zakladki_total || 0)} закл{" "}
-                                <span className="text-gray-500">
-                                  ({Number(p.zakladki_per_unit || 0)}/шт)
-                                </span>
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {barData?.debug?.usedProductsSales && (
-                    <div className="mt-3 bg-gray-800/40 border border-gray-700 rounded-lg p-2">
-                      <p className="text-xs text-gray-400">
-                        debug: {barData.debug.usedProductsSales.m}
-                      </p>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
@@ -560,39 +491,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Loading skeleton */}
-        {(loading || barLoading) && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div
-                key={i}
-                className="bg-gray-800 rounded-xl p-4 shadow-lg border border-gray-700"
-              >
-                <div className="animate-pulse">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="space-y-2">
-                      <div className="h-4 bg-gray-600 rounded w-24"></div>
-                      <div className="h-3 bg-gray-600 rounded w-16"></div>
-                    </div>
-                    <div className="h-3 w-8 bg-gray-600 rounded"></div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="h-3 bg-gray-600 rounded w-16 mb-1"></div>
-                      <div className="h-4 bg-gray-600 rounded w-20"></div>
-                    </div>
-                    <div>
-                      <div className="h-3 bg-gray-600 rounded w-12 mb-1"></div>
-                      <div className="h-4 bg-gray-600 rounded w-16"></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Empty */}
         {!loading && daySales.length === 0 && !error && (
           <div className="bg-gray-800 rounded-xl p-8 shadow-lg border border-gray-700 text-center">
             <Users className="w-16 h-16 text-gray-600 mx-auto mb-4" />
@@ -602,7 +500,6 @@ export default function App() {
         )}
       </div>
 
-      {/* Footer */}
       <div className="text-center py-4">
         <p className="text-gray-500 text-xs font-medium">GRECO Tech™</p>
       </div>
