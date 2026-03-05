@@ -291,5 +291,104 @@ app.get("/api/bar-sales", async (req, res) => {
   }
 });
 
+// -------------------- SAUCES & EXTRAS (допи) --------------------
+// Категория "ДОПИ" в Poster = category_id 37
+const SAUCE_CATEGORY_IDS = new Set([17, 37, 41]);
+
+app.get("/api/sauces-sales", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
+
+    await ensureProducts();
+
+    // Собираем set product_id, которые принадлежат категории ДОПИ
+    const sauceProductIds = new Set();
+    for (const [pid, info] of PRODUCT_INFO.entries()) {
+      if (SAUCE_CATEGORY_IDS.has(info.category_id)) {
+        sauceProductIds.add(pid);
+      }
+    }
+
+    // Загружаем все закрытые чеки с товарами за период
+    let allTransactions = [];
+    let nextTr = null;
+    let safetyLimit = 20; // максимум 20 страниц
+
+    while (safetyLimit-- > 0) {
+      const params = {
+        dateFrom,
+        dateTo,
+        status: 2, // только закрытые
+        include_products: true,
+      };
+      if (nextTr) params.next_tr = nextTr;
+
+      const j = await poster("dash.getTransactions", params);
+      const batch = Array.isArray(j?.response) ? j.response : [];
+
+      if (!batch.length) break;
+
+      allTransactions = allTransactions.concat(batch);
+
+      // Poster пагинация: если вернулось меньше ~100, значит последняя страница
+      if (batch.length < 100) break;
+      nextTr = batch[batch.length - 1].transaction_id;
+    }
+
+    // Группируем по официанту
+    const byWaiter = new Map(); // user_id -> { name, revenue, qty }
+
+    for (const tr of allTransactions) {
+      const uid = String(tr.user_id);
+      const waiterName = tr.name || "—";
+      const products = Array.isArray(tr.products) ? tr.products : [];
+
+      for (const p of products) {
+        const pid = Number(p.product_id ?? p.id ?? p.menu_id);
+        if (!sauceProductIds.has(pid)) continue;
+
+        // Сумма товара в копейках
+        const productSum = Number(p.product_sum ?? p.sum ?? p.price ?? 0);
+        const productQty = Number(p.num ?? p.count ?? p.quantity ?? p.qty ?? 1);
+
+        if (!byWaiter.has(uid)) {
+          byWaiter.set(uid, { user_id: uid, name: waiterName, revenue: 0, qty: 0 });
+        }
+
+        const w = byWaiter.get(uid);
+        w.revenue += productSum;
+        w.qty += productQty;
+      }
+    }
+
+    // Конвертируем копейки → гривни, сортируем по выручке
+    const result = [...byWaiter.values()]
+      .map((w) => ({
+        ...w,
+        revenue: Math.round(w.revenue / 100), // копейки → гривни
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const totalRevenue = result.reduce((s, w) => s + w.revenue, 0);
+    const totalQty = result.reduce((s, w) => s + w.qty, 0);
+
+    res.json({
+      dateFrom,
+      dateTo,
+      by_waiter: result,
+      total: { revenue: totalRevenue, qty: totalQty },
+      debug: {
+        sauceProductIds: [...sauceProductIds],
+        transactionsCount: allTransactions.length,
+      },
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error", detail: String(e) });
+  }
+});
+
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`API server listening on ${port}`));
