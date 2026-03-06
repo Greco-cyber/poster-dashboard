@@ -98,8 +98,10 @@ async function ensureProducts() {
     const pid = Number(p.product_id ?? p.id ?? p.menu_id ?? p.good_id);
     const cid = Number(p.menu_category_id ?? p.category_id ?? p.group_id ?? p.category);
     const name = String(p.product_name ?? p.name ?? "");
+    // base price in kopecks (price field from menu.getProducts, e.g. "6900")
+    const basePrice = Number(p.price ?? 0);
     if (Number.isFinite(pid)) {
-      map.set(pid, { name, category_id: Number.isFinite(cid) ? cid : null });
+      map.set(pid, { name, category_id: Number.isFinite(cid) ? cid : null, basePrice });
     }
   }
 
@@ -338,58 +340,78 @@ app.get("/api/sauces-sales", async (req, res) => {
     }
 
     // Группируем по официанту
-    const byWaiter = new Map(); // user_id -> { name, revenue, qty }
+    const byWaiter = new Map(); // user_id -> { name, revenue, qty, modRevenue, modQty }
 
-    // Debug: собираем пример продуктов из первого чека
-    let sampleProducts = [];
+    // Debug counters
     let totalProductsSeen = 0;
     let matchedProducts = 0;
+    let matchedModifiers = 0;
+
+    function ensureWaiter(uid, name) {
+      if (!byWaiter.has(uid)) {
+        byWaiter.set(uid, { user_id: uid, name, revenue: 0, qty: 0, modRevenue: 0, modQty: 0 });
+      }
+      return byWaiter.get(uid);
+    }
 
     for (const tr of allTransactions) {
       const uid = String(tr.user_id);
       const waiterName = tr.name || "—";
       const products = Array.isArray(tr.products) ? tr.products : [];
 
-      if (sampleProducts.length === 0 && products.length > 0) {
-        sampleProducts = products.slice(0, 3).map((p) => ({
-          product_id: p.product_id,
-          num: p.num,
-          product_price: p.product_price,
-          payed_sum: p.payed_sum,
-        }));
-      }
-
       for (const p of products) {
         const pid = Number(p.product_id);
+        const modId = Number(p.modification_id || 0);
         totalProductsSeen++;
 
-        if (!sauceProductIds.has(pid)) continue;
-        matchedProducts++;
+        // product_price — цена за ВСЕ единицы в копейках, num — количество
+        const price = Number(p.product_price ?? 0);
+        const productQty = Number(p.num ?? 1);
 
-        // payed_sum — это оплаченная сумма в копейках
-        const productSum = Number(p.payed_sum ?? p.product_sum ?? p.sum ?? p.product_price ?? 0);
-        const productQty = Number(p.num ?? p.count ?? p.quantity ?? p.qty ?? 1);
-
-        if (!byWaiter.has(uid)) {
-          byWaiter.set(uid, { user_id: uid, name: waiterName, revenue: 0, qty: 0 });
+        // 1) Отдельный товар из категории соусов/допов (17/37/41)
+        if (sauceProductIds.has(pid)) {
+          matchedProducts++;
+          // product_price уже сумма за все num штук
+          const w = ensureWaiter(uid, waiterName);
+          w.revenue += price;
+          w.qty += productQty;
         }
 
-        const w = byWaiter.get(uid);
-        w.revenue += productSum;
-        w.qty += productQty;
+        // 2) Модификатор к любому товару: разница между ценой в чеке и базовой ценой
+        if (modId !== 0) {
+          const info = PRODUCT_INFO.get(pid);
+          if (info && info.basePrice > 0) {
+            // product_price = total for all units, so per unit = price / num
+            const pricePerUnit = Math.round(price / productQty);
+            const modCost = pricePerUnit - info.basePrice;
+            if (modCost > 0) {
+              matchedModifiers++;
+              const modSum = Math.round(modCost * productQty);
+              const w = ensureWaiter(uid, waiterName);
+              w.modRevenue += modSum;
+              w.modQty += productQty;
+            }
+          }
+        }
       }
     }
 
-    // Конвертируем копейки → гривни, сортируем по выручке
+    // Конвертируем копейки → гривни, сортируем по общей выручке допов
     const result = [...byWaiter.values()]
       .map((w) => ({
-        ...w,
-        revenue: Math.round(w.revenue / 100), // копейки → гривни
+        user_id: w.user_id,
+        name: w.name,
+        revenue: Math.round(w.revenue / 100), // соусы/допы из категорий
+        qty: w.qty,
+        modRevenue: Math.round(w.modRevenue / 100), // модификаторы
+        modQty: w.modQty,
+        totalRevenue: Math.round((w.revenue + w.modRevenue) / 100), // всё вместе
+        totalQty: w.qty + w.modQty,
       }))
-      .sort((a, b) => b.revenue - a.revenue);
+      .sort((a, b) => b.totalRevenue - a.totalRevenue);
 
-    const totalRevenue = result.reduce((s, w) => s + w.revenue, 0);
-    const totalQty = result.reduce((s, w) => s + w.qty, 0);
+    const totalRevenue = result.reduce((s, w) => s + w.totalRevenue, 0);
+    const totalQty = result.reduce((s, w) => s + w.totalQty, 0);
 
     res.json({
       dateFrom,
@@ -397,17 +419,12 @@ app.get("/api/sauces-sales", async (req, res) => {
       by_waiter: result,
       total: { revenue: totalRevenue, qty: totalQty },
       debug: {
-        sauceProductIds: [...sauceProductIds].slice(0, 20),
         sauceProductCount: sauceProductIds.size,
         totalProductsInCache: PRODUCT_INFO.size,
         transactionsCount: allTransactions.length,
         totalProductsSeen,
         matchedProducts,
-        sampleProducts,
-        sampleCacheEntries: [...PRODUCT_INFO.entries()]
-          .filter(([, info]) => SAUCE_CATEGORY_IDS.has(info.category_id))
-          .slice(0, 5)
-          .map(([pid, info]) => ({ pid, ...info })),
+        matchedModifiers,
       },
     });
   } catch (e) {
