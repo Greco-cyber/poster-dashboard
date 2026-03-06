@@ -539,12 +539,12 @@ export default function App() {
                               </td>
                               <td className="text-right px-3 py-3">
                                 <p className="font-bold text-white text-base">
-                                  {money(w.revenue || 0)}₴
+                                  {money(w.totalRevenue ?? w.revenue ?? 0)}₴
                                 </p>
                               </td>
                               <td className="text-right px-4 py-3">
                                 <p className="font-semibold text-gray-300 text-base">
-                                  {money(monthRow?.revenue || 0)}₴
+                                  {money(monthRow?.totalRevenue ?? monthRow?.revenue ?? 0)}₴
                                 </p>
                               </td>
                             </tr>
