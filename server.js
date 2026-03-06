@@ -340,17 +340,34 @@ app.get("/api/sauces-sales", async (req, res) => {
     // Группируем по официанту
     const byWaiter = new Map(); // user_id -> { name, revenue, qty }
 
+    // Debug: собираем пример продуктов из первого чека
+    let sampleProducts = [];
+    let totalProductsSeen = 0;
+    let matchedProducts = 0;
+
     for (const tr of allTransactions) {
       const uid = String(tr.user_id);
       const waiterName = tr.name || "—";
       const products = Array.isArray(tr.products) ? tr.products : [];
 
-      for (const p of products) {
-        const pid = Number(p.product_id ?? p.id ?? p.menu_id);
-        if (!sauceProductIds.has(pid)) continue;
+      if (sampleProducts.length === 0 && products.length > 0) {
+        sampleProducts = products.slice(0, 3).map((p) => ({
+          product_id: p.product_id,
+          num: p.num,
+          product_price: p.product_price,
+          payed_sum: p.payed_sum,
+        }));
+      }
 
-        // Сумма товара в копейках
-        const productSum = Number(p.product_sum ?? p.sum ?? p.price ?? 0);
+      for (const p of products) {
+        const pid = Number(p.product_id);
+        totalProductsSeen++;
+
+        if (!sauceProductIds.has(pid)) continue;
+        matchedProducts++;
+
+        // payed_sum — это оплаченная сумма в копейках
+        const productSum = Number(p.payed_sum ?? p.product_sum ?? p.sum ?? p.product_price ?? 0);
         const productQty = Number(p.num ?? p.count ?? p.quantity ?? p.qty ?? 1);
 
         if (!byWaiter.has(uid)) {
@@ -380,8 +397,17 @@ app.get("/api/sauces-sales", async (req, res) => {
       by_waiter: result,
       total: { revenue: totalRevenue, qty: totalQty },
       debug: {
-        sauceProductIds: [...sauceProductIds],
+        sauceProductIds: [...sauceProductIds].slice(0, 20),
+        sauceProductCount: sauceProductIds.size,
+        totalProductsInCache: PRODUCT_INFO.size,
         transactionsCount: allTransactions.length,
+        totalProductsSeen,
+        matchedProducts,
+        sampleProducts,
+        sampleCacheEntries: [...PRODUCT_INFO.entries()]
+          .filter(([, info]) => SAUCE_CATEGORY_IDS.has(info.category_id))
+          .slice(0, 5)
+          .map(([pid, info]) => ({ pid, ...info })),
       },
     });
   } catch (e) {
