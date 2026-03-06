@@ -354,6 +354,24 @@ app.get("/api/sauces-sales", async (req, res) => {
       return byWaiter.get(uid);
     }
 
+    // Прохід 1: збираємо мінімальну ціну за одиницю для кожного product_id
+    // (basePrice з меню = 0 для багатьох товарів, тому беремо мін. ціну з чеків)
+    const minPricePerProduct = new Map();
+    for (const tr of allTransactions) {
+      for (const p of Array.isArray(tr.products) ? tr.products : []) {
+        const pid = Number(p.product_id);
+        if (sauceProductIds.has(pid)) continue;
+        const price = Number(p.product_price ?? 0);
+        const qty = Number(p.num ?? 1);
+        if (!price || !qty) continue;
+        const pricePerUnit = Math.round(price / qty);
+        if (!minPricePerProduct.has(pid) || pricePerUnit < minPricePerProduct.get(pid)) {
+          minPricePerProduct.set(pid, pricePerUnit);
+        }
+      }
+    }
+
+    // Прохід 2: рахуємо виручку соусів + надбавку від модифікаторів
     for (const tr of allTransactions) {
       const uid = String(tr.user_id);
       const waiterName = tr.name || "—";
@@ -363,27 +381,23 @@ app.get("/api/sauces-sales", async (req, res) => {
         const pid = Number(p.product_id);
         totalProductsSeen++;
 
-        // product_price — цена за ВСЕ единицы в копейках, num — количество
         const price = Number(p.product_price ?? 0);
         const productQty = Number(p.num ?? 1);
 
-        // 1) Отдельный товар из категории соусов/допов (17/37/41)
+        // 1) Окремий товар з категорії соусів/допів (17/37/41)
         if (sauceProductIds.has(pid)) {
           matchedProducts++;
-          // product_price уже сумма за все num штук
           const w = ensureWaiter(uid, waiterName);
           w.revenue += price;
           w.qty += productQty;
         }
 
-        // 2) Модификатор к любому товару: разница между ценой в чеке и базовой ценой
-        // Poster не присылает modification_id для модификаторов цены —
-        // просто сравниваем фактическую цену с базовой из меню
+        // 2) Модифікатор: різниця між ціною в чеку і мінімальною ціною цього товару
         if (!sauceProductIds.has(pid)) {
-          const info = PRODUCT_INFO.get(pid);
-          if (info && info.basePrice > 0) {
+          const basePrice = minPricePerProduct.get(pid);
+          if (basePrice > 0) {
             const pricePerUnit = Math.round(price / productQty);
-            const modCost = pricePerUnit - info.basePrice;
+            const modCost = pricePerUnit - basePrice;
             if (modCost > 0) {
               matchedModifiers++;
               const modSum = Math.round(modCost * productQty);
