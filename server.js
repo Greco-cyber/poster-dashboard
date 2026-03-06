@@ -435,3 +435,39 @@ app.get("/api/sauces-sales", async (req, res) => {
 
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`API server listening on ${port}`));
+
+// -------------------- DEBUG: products in today's transactions --------------------
+app.get("/api/debug-products", async (req, res) => {
+  try {
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
+    await ensureProducts();
+
+    const j = await poster("dash.getTransactions", { dateFrom, dateTo, status: 2, include_products: true });
+    const transactions = Array.isArray(j?.response) ? j.response : [];
+
+    const seen = new Map();
+    for (const tr of transactions) {
+      for (const p of Array.isArray(tr.products) ? tr.products : []) {
+        const pid = Number(p.product_id);
+        const price = Number(p.product_price ?? 0);
+        const qty = Number(p.num ?? 1);
+        const pricePerUnit = Math.round(price / qty);
+
+        if (!seen.has(pid)) {
+          const info = PRODUCT_INFO.get(pid) || {};
+          seen.set(pid, { pid, name: info.name || p.product_name || "", basePrice: info.basePrice || 0, prices: new Set() });
+        }
+        seen.get(pid).prices.add(pricePerUnit);
+      }
+    }
+
+    const result = [...seen.values()]
+      .map(x => ({ pid: x.pid, name: x.name, basePrice: x.basePrice, pricesInChecks: [...x.prices].sort((a,b)=>a-b) }))
+      .filter(x => x.pricesInChecks.some(p => p !== x.basePrice))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({ count: result.length, items: result });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
