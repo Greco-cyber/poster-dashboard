@@ -361,7 +361,6 @@ app.get("/api/sauces-sales", async (req, res) => {
 
       for (const p of products) {
         const pid = Number(p.product_id);
-        const modId = Number(p.modification_id || 0);
         totalProductsSeen++;
 
         // product_price — цена за ВСЕ единицы в копейках, num — количество
@@ -378,10 +377,11 @@ app.get("/api/sauces-sales", async (req, res) => {
         }
 
         // 2) Модификатор к любому товару: разница между ценой в чеке и базовой ценой
-        if (modId !== 0) {
+        // Poster не присылает modification_id для модификаторов цены —
+        // просто сравниваем фактическую цену с базовой из меню
+        if (!sauceProductIds.has(pid)) {
           const info = PRODUCT_INFO.get(pid);
           if (info && info.basePrice > 0) {
-            // product_price = total for all units, so per unit = price / num
             const pricePerUnit = Math.round(price / productQty);
             const modCost = pricePerUnit - info.basePrice;
             if (modCost > 0) {
