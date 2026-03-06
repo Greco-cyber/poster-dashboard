@@ -354,24 +354,14 @@ app.get("/api/sauces-sales", async (req, res) => {
       return byWaiter.get(uid);
     }
 
-    // Прохід 1: збираємо мінімальну ціну за одиницю для кожного product_id
-    // (basePrice з меню = 0 для багатьох товарів, тому беремо мін. ціну з чеків)
-    const minPricePerProduct = new Map();
-    for (const tr of allTransactions) {
-      for (const p of Array.isArray(tr.products) ? tr.products : []) {
-        const pid = Number(p.product_id);
-        if (sauceProductIds.has(pid)) continue;
-        const price = Number(p.product_price ?? 0);
-        const qty = Number(p.num ?? 1);
-        if (!price || !qty) continue;
-        const pricePerUnit = Math.round(price / qty);
-        if (!minPricePerProduct.has(pid) || pricePerUnit < minPricePerProduct.get(pid)) {
-          minPricePerProduct.set(pid, pricePerUnit);
-        }
+    // Збираємо product_id товарів з назвою "+..." (модифікатори через назву)
+    const plusProductIds = new Set();
+    for (const [pid, info] of PRODUCT_INFO.entries()) {
+      if (info.name && info.name.trim().startsWith("+")) {
+        plusProductIds.add(pid);
       }
     }
 
-    // Прохід 2: рахуємо виручку соусів + надбавку від модифікаторів
     for (const tr of allTransactions) {
       const uid = String(tr.user_id);
       const waiterName = tr.name || "—";
@@ -384,7 +374,7 @@ app.get("/api/sauces-sales", async (req, res) => {
         const price = Number(p.product_price ?? 0);
         const productQty = Number(p.num ?? 1);
 
-        // 1) Окремий товар з категорії соусів/допів (17/37/41)
+        // 1) Товар з категорії соусів/допів (17/37/41)
         if (sauceProductIds.has(pid)) {
           matchedProducts++;
           const w = ensureWaiter(uid, waiterName);
@@ -392,20 +382,12 @@ app.get("/api/sauces-sales", async (req, res) => {
           w.qty += productQty;
         }
 
-        // 2) Модифікатор: різниця між ціною в чеку і мінімальною ціною цього товару
-        if (!sauceProductIds.has(pid)) {
-          const basePrice = minPricePerProduct.get(pid);
-          if (basePrice > 0) {
-            const pricePerUnit = Math.round(price / productQty);
-            const modCost = pricePerUnit - basePrice;
-            if (modCost > 0) {
-              matchedModifiers++;
-              const modSum = Math.round(modCost * productQty);
-              const w = ensureWaiter(uid, waiterName);
-              w.modRevenue += modSum;
-              w.modQty += productQty;
-            }
-          }
+        // 2) Товар з назвою "+" — модифікатор (додаткові інгредієнти)
+        if (!sauceProductIds.has(pid) && plusProductIds.has(pid)) {
+          matchedModifiers++;
+          const w = ensureWaiter(uid, waiterName);
+          w.modRevenue += price;
+          w.modQty += productQty;
         }
       }
     }
