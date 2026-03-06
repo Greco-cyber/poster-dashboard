@@ -31,6 +31,11 @@ const money = (n) =>
     maximumFractionDigits: 0,
   });
 
+function safeText(s, fallback = "—") {
+  const v = String(s || "").trim();
+  return v ? v : fallback;
+}
+
 export default function App() {
   const today = useMemo(() => yyyymmdd(), []);
   const [date, setDate] = useState(today);
@@ -46,25 +51,38 @@ export default function App() {
   const [barError, setBarError] = useState("");
   const [barData, setBarData] = useState(null);
 
-  // SAUCES (placeholder — заполним когда будет category_id)
-  const [saucesLoading, setSaucesLoading] = useState(false);
-  const [saucesData, setSaucesData] = useState(null);
-
-  // ✅ Coffee shots mapping
+  // ✅ ОБНОВЛЕНО: 530=1, 531=2, + кава в зал, 423=2
   const shotsOverride = useMemo(
     () =>
       new Map([
-        [230, 1], [485, 1], [307, 2], [231, 1], [316, 1],
-        [406, 1], [183, 1], [182, 1], [317, 1],
-        [425, 1], [424, 1], [441, 1], [422, 1], [423, 2],
-        [529, 1], [530, 1], [531, 2], [533, 1], [534, 1], [535, 1],
+        // cat 34
+        [230, 1],
+        [485, 1],
+        [307, 2],
+        [231, 1],
+        [316, 1],
+        [406, 1],
+        [183, 1],
+        [182, 1],
+        [317, 1],
+
+        // кава в зал
+        [425, 1],
+        [424, 1],
+        [441, 1],
+        [422, 1],
+        [423, 2],
+
+        // cat 47 (штат)
+        [529, 1],
+        [530, 1], // 🔁
+        [531, 2], // ✅
+        [533, 1],
+        [534, 1],
+        [535, 1],
       ]),
     []
   );
-
-  // ==================== SAUCES CONFIG ====================
-  // TODO: Антон, впиши сюда category_id соусов и допов из Poster
-  const SAUCE_CATEGORY_IDS = useMemo(() => new Set([17, 37, 41]), []);
 
   const fetchJsonOrThrow = useCallback(async (url) => {
     const r = await fetch(url);
@@ -75,37 +93,12 @@ export default function App() {
     return JSON.parse(t || "{}");
   }, []);
 
-  // ==================== LOAD SAUCES ====================
-  const loadSauces = useCallback(async () => {
-    if (SAUCE_CATEGORY_IDS.size === 0) return; // нет категорий — пропускаем
-
-    setSaucesLoading(true);
-    try {
-      const mFrom = firstDayOfMonthStr(date);
-      const mTo = lastDayOfMonthStr(date);
-
-      // День: все закрытые чеки с товарами
-      const dayData = await fetchJsonOrThrow(
-        `${API_BASE}/api/sauces-sales?dateFrom=${date}&dateTo=${date}`
-      );
-
-      // Месяц
-      const monthData = await fetchJsonOrThrow(
-        `${API_BASE}/api/sauces-sales?dateFrom=${mFrom}&dateTo=${mTo}`
-      );
-
-      setSaucesData({ day: dayData, month: monthData });
-    } catch (e) {
-      console.error("Sauces load error:", e);
-      setSaucesData(null);
-    } finally {
-      setSaucesLoading(false);
-    }
-  }, [date, fetchJsonOrThrow, SAUCE_CATEGORY_IDS.size]);
-
   const loadAll = useCallback(async () => {
+    // Waiters
     setLoading(true);
     setError("");
+
+    // Bar
     setBarLoading(true);
     setBarError("");
 
@@ -134,19 +127,20 @@ export default function App() {
       setAvgPerMonthMap(avgMap);
     } catch (e) {
       console.error(e);
-      setError("Не вдалося завантажити дані.");
+      setError("Не вдалося завантажити дані. Перевір адресу API, токен або дату.");
       setDaySales([]);
       setAvgPerMonthMap({});
     } finally {
       setLoading(false);
     }
 
-    // BAR
+    // BAR load
     try {
       const dBar = await fetchJsonOrThrow(
         `${API_BASE}/api/bar-sales?dateFrom=${date}&dateTo=${date}`
       );
 
+      // Patch coffee per-unit totals (front safety)
       const patched = { ...dBar };
       if (patched?.coffee && Array.isArray(patched.coffee.by_product)) {
         let totalQty = 0;
@@ -163,14 +157,20 @@ export default function App() {
           totalQty += qty;
           totalZak += zak;
 
-          return { ...row, zakladki_per_unit: per, zakladki_total: zak };
+          return {
+            ...row,
+            zakladki_per_unit: per,
+            zakladki_total: zak,
+          };
         });
 
         patched.coffee = {
           ...patched.coffee,
           total_qty: totalQty,
           total_zakladki: totalZak,
-          by_product: byProduct.sort((a, b) => Number(b.qty || 0) - Number(a.qty || 0)),
+          by_product: byProduct.sort(
+            (a, b) => Number(b.qty || 0) - Number(a.qty || 0)
+          ),
         };
       }
 
@@ -182,36 +182,53 @@ export default function App() {
     } finally {
       setBarLoading(false);
     }
+  }, [date, fetchJsonOrThrow, shotsOverride]);
 
-    // SAUCES
-    loadSauces();
-  }, [date, fetchJsonOrThrow, shotsOverride, loadSauces]);
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
   useEffect(() => {
     const id = setInterval(loadAll, 5 * 60 * 1000);
     return () => clearInterval(id);
   }, [loadAll]);
 
-  // ==================== Computed ====================
+  // Totals
   const totals = useMemo(() => {
-    const totalRevenue = daySales.reduce((s, w) => s + Number(w.revenue || 0) / 100, 0);
-    const totalChecks = daySales.reduce((s, w) => s + Number(w.clients || 0), 0);
+    const totalRevenue = daySales.reduce(
+      (sum, w) => sum + Number(w.revenue || 0) / 100,
+      0
+    );
+    const totalChecks = daySales.reduce(
+      (sum, w) => sum + Number(w.clients || 0),
+      0
+    );
     const avgCheck = totalChecks > 0 ? totalRevenue / totalChecks : 0;
     return { totalRevenue, totalChecks, avgCheck };
   }, [daySales]);
 
+  // BAR categories
   const barCats = useMemo(() => {
     const arr = Array.isArray(barData?.categories) ? barData.categories : [];
     const map = new Map(arr.map((x) => [Number(x.category_id), x]));
-    const pick = (id, fallback) => ({
-      category_id: id,
-      name: fallback,
-      qty: Number(map.get(id)?.qty || 0),
-    });
-    return [pick(9, "Пиво"), pick(14, "Холодні напої"), pick(34, "Коктейлі")];
+
+    const pick = (id, fallback) => {
+      const v = map.get(id);
+      return {
+        category_id: id,
+        name: fallback, // фикс. названия
+        qty: Number(v?.qty || 0),
+      };
+    };
+
+    return [
+      pick(9, "Пиво"),
+      pick(14, "Холодні напої"),
+      pick(34, "Коктейлі"),
+    ];
   }, [barData]);
 
+  // Coffee
   const coffee = useMemo(() => {
     const c = barData?.coffee || {};
     return {
@@ -221,13 +238,22 @@ export default function App() {
     };
   }, [barData]);
 
+  // Split totals by categories using product_id mapping
   const coffeeSplit = useMemo(() => {
     const by = coffee.by_product;
-    const cat34Set = new Set([230, 485, 307, 231, 316, 406, 183, 182, 317, 425, 424, 441, 422, 423]);
+
+    // ✅ cat 34 + кава в зал
+    const cat34Set = new Set([
+      230, 485, 307, 231, 316, 406, 183, 182, 317,
+      425, 424, 441, 422, 423,
+    ]);
+
+    // ✅ cat 47 + 531
     const cat47Set = new Set([529, 530, 531, 533, 534, 535]);
 
     const sumForSet = (set) => {
-      let qty = 0, zak = 0;
+      let qty = 0;
+      let zak = 0;
       for (const row of by) {
         const pid = Number(row.product_id);
         if (!set.has(pid)) continue;
@@ -242,23 +268,13 @@ export default function App() {
       cat47: sumForSet(cat47Set),
       overall: { qty: coffee.total_qty, zakladki: coffee.total_zakladki },
     };
-  }, [coffee]);
-
-  // Sorted employees
-  const sortedEmployees = useMemo(
-    () => [...daySales].sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0)),
-    [daySales]
-  );
+  }, [coffee.by_product, coffee.total_qty, coffee.total_zakladki]);
 
   const showMain = !loading && daySales.length > 0;
-  const isLoading = loading || barLoading;
-
-  // ==================== CATEGORY COLORS ====================
-  const catColors = ["bg-amber-400", "bg-blue-400", "bg-orange-400"];
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      {/* ===================== HEADER ===================== */}
+      {/* Header */}
       <div className="bg-gray-800 border-b border-gray-700 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
@@ -281,11 +297,13 @@ export default function App() {
 
             <button
               onClick={loadAll}
-              disabled={isLoading}
+              disabled={loading || barLoading}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-all"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-              {isLoading ? "Оновлення..." : "Оновити"}
+              <RefreshCw
+                className={`w-4 h-4 ${loading || barLoading ? "animate-spin" : ""}`}
+              />
+              {loading || barLoading ? "Оновлення..." : "Оновити"}
             </button>
           </div>
         </div>
@@ -293,297 +311,236 @@ export default function App() {
 
       <div className="max-w-7xl mx-auto p-4 space-y-4">
         {error && (
-          <div className="bg-red-900/60 border border-red-700 rounded-xl p-3">
+          <div className="bg-red-900 border border-red-700 rounded-xl p-3">
             <p className="text-red-200 text-sm">{error}</p>
           </div>
         )}
+
         {barError && (
-          <div className="bg-yellow-900/60 border border-yellow-700 rounded-xl p-3">
+          <div className="bg-yellow-900 border border-yellow-700 rounded-xl p-3">
             <p className="text-yellow-200 text-sm">{barError}</p>
           </div>
         )}
 
-        {/* ===================== KPI CARDS ===================== */}
+        {/* Summary */}
         {showMain && (
-          <div className="grid grid-cols-3 gap-3">
-            <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-              <div className="flex items-center gap-2 mb-1">
-                <CreditCard className="w-4 h-4 text-green-400" />
-                <span className="text-gray-400 text-xs font-medium">Виручка</span>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-gray-800 rounded-xl p-4 shadow-lg border border-gray-700">
+              <div className="flex items-center gap-2 mb-2">
+                <CreditCard className="w-5 h-5 text-green-400" />
+                <span className="text-gray-300 text-sm font-medium">Виручка</span>
               </div>
-              <p className="text-2xl font-bold">{money(totals.totalRevenue)} ₴</p>
+              <p className="text-2xl font-bold text-white">
+                {money(totals.totalRevenue)} ₴
+              </p>
             </div>
 
-            <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-              <div className="flex items-center gap-2 mb-1">
-                <Users className="w-4 h-4 text-blue-400" />
-                <span className="text-gray-400 text-xs font-medium">Чеки</span>
+            <div className="bg-gray-800 rounded-xl p-4 shadow-lg border border-gray-700">
+              <div className="flex items-center gap-2 mb-2">
+                <Users className="w-5 h-5 text-blue-400" />
+                <span className="text-gray-300 text-sm font-medium">Чеки</span>
               </div>
-              <p className="text-2xl font-bold">{totals.totalChecks}</p>
+              <p className="text-2xl font-bold text-white">{totals.totalChecks}</p>
             </div>
 
-            <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-              <div className="flex items-center gap-2 mb-1">
-                <CreditCard className="w-4 h-4 text-purple-400" />
-                <span className="text-gray-400 text-xs font-medium">Серед. чек</span>
+            <div className="bg-gray-800 rounded-xl p-4 shadow-lg border border-gray-700">
+              <div className="flex items-center gap-2 mb-2">
+                <CreditCard className="w-5 h-5 text-purple-400" />
+                <span className="text-gray-300 text-sm font-medium">Серед. чек</span>
               </div>
-              <p className="text-2xl font-bold">{money(totals.avgCheck)} ₴</p>
+              <p className="text-2xl font-bold text-white">
+                {money(totals.avgCheck)} ₴
+              </p>
             </div>
           </div>
         )}
 
-        {/* ===================== MAIN GRID ===================== */}
+        {/* Main grid */}
         {showMain && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 h-[calc(100vh-280px)]">
+            {/* LEFT: Bar */}
+            <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden flex flex-col">
+              <div className="px-4 py-3 border-b border-gray-700 bg-gradient-to-r from-gray-800 to-gray-750">
+                <h2 className="font-bold text-white text-lg">🍺 Бар</h2>
+                <p className="text-gray-400 text-xs mt-0.5">
+                  Продажі за {dateInputValue(date)}
+                </p>
+              </div>
 
-            {/* -------- LEFT COLUMN: Bar + Coffee (compact) -------- */}
-            <div className="lg:col-span-3 space-y-4">
+              <div className="p-4 space-y-4 overflow-y-auto">
+                {/* Categories */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    Категорії напоїв
+                  </h3>
 
-              {/* BAR CATEGORIES */}
-              <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
-                <h2 className="font-bold text-white text-base mb-3">🍺 Бар</h2>
-                <div className="space-y-2">
-                  {barCats.map((c, idx) => (
+                  <div className="space-y-2">
+                    {barCats.map((c, idx) => (
+                      <div
+                        key={c.category_id}
+                        className="bg-gray-900/50 hover:bg-gray-900/70 transition-colors border border-gray-700 rounded-lg p-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`w-2 h-2 rounded-full ${
+                                idx === 0
+                                  ? "bg-amber-400"
+                                  : idx === 1
+                                  ? "bg-blue-400"
+                                  : "bg-orange-400"
+                              }`}
+                            />
+                            <p className="text-sm font-medium text-white">{c.name}</p>
+                          </div>
+
+                          <div className="text-right">
+                            <p className="text-lg font-bold text-white">{c.qty}</p>
+                            <p className="text-xs text-gray-400">шт</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Coffee shots */}
+                <div className="pt-3 border-t border-gray-700">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                    ☕ Закладки кави
+                  </h3>
+
+                  <div className="space-y-2">
+                    <div className="bg-gradient-to-br from-orange-900/30 to-orange-800/20 border border-orange-700/50 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="text-xs text-orange-300/80 font-medium">Зал</p>
+                          <p className="text-sm font-semibold text-white">Кава в залі</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-bold text-white">
+                            {coffeeSplit.cat34.qty}
+                          </p>
+                          <p className="text-xs text-orange-200">шт</p>
+                        </div>
+                      </div>
+                      <div className="pt-2 border-t border-orange-700/30">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs text-orange-300/70">Закладок:</span>
+                          <span className="text-sm font-bold text-orange-200">
+                            {coffeeSplit.cat34.zakladki}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-amber-900/30 to-amber-800/20 border border-amber-700/50 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="text-xs text-amber-300/80 font-medium">Персонал</p>
+                          <p className="text-sm font-semibold text-white">Кава штат</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-bold text-white">
+                            {coffeeSplit.cat47.qty}
+                          </p>
+                          <p className="text-xs text-amber-200">шт</p>
+                        </div>
+                      </div>
+                      <div className="pt-2 border-t border-amber-700/30">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs text-amber-300/70">Закладок:</span>
+                          <span className="text-sm font-bold text-amber-200">
+                            {coffeeSplit.cat47.zakladki}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-gray-800 to-gray-750 border-2 border-orange-600/50 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="text-xs text-orange-400 font-medium">Разом</p>
+                          <p className="text-base font-bold text-white">Всього кави</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-orange-400">
+                            {coffeeSplit.overall.qty}
+                          </p>
+                          <p className="text-xs text-gray-300">шт</p>
+                        </div>
+                      </div>
+                      <div className="pt-2 border-t border-orange-600/30">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs text-gray-300">Закладок:</span>
+                          <span className="text-lg font-bold text-orange-400">
+                            {coffeeSplit.overall.zakladki}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* RIGHT: Employees */}
+            <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-4 overflow-y-auto h-full">
+              {daySales
+                .sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))
+                .map((w) => {
+                  const uid = w.user_id;
+                  const revenueUAH = Number(w.revenue || 0) / 100;
+                  const checks = Number(w.clients || 0);
+                  const avgDay = checks > 0 ? revenueUAH / checks : 0;
+                  const avgMonth = avgPerMonthMap[uid];
+
+                  return (
                     <div
-                      key={c.category_id}
-                      className="flex items-center justify-between bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2"
+                      key={uid}
+                      className="bg-gray-800 rounded-lg border border-gray-700 p-3"
                     >
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${catColors[idx]}`} />
-                        <span className="text-sm text-white">{c.name}</span>
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <h3 className="font-semibold text-white text-base truncate">
+                            {w.name || "—"}
+                          </h3>
+                          <p className="text-gray-400 text-sm">
+                            {w.name?.toLowerCase().includes("бар") ? "Бармен" : "Офіціант"}
+                          </p>
+                        </div>
                       </div>
-                      <span className="text-lg font-bold text-white">{c.qty}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
 
-              {/* COFFEE */}
-              <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
-                <h2 className="font-bold text-white text-base mb-3">☕ Кава</h2>
-
-                <div className="space-y-2">
-                  {/* Зал */}
-                  <div className="bg-orange-900/20 border border-orange-700/40 rounded-lg px-3 py-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-orange-300/80">Зал</p>
-                        <p className="text-sm font-semibold text-white">Кава в залі</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-lg font-bold text-white">{coffeeSplit.cat34.qty}</p>
-                      </div>
-                    </div>
-                    <div className="flex justify-between items-center mt-1 pt-1 border-t border-orange-700/30">
-                      <span className="text-xs text-orange-300/60">Закладок</span>
-                      <span className="text-sm font-bold text-orange-300">{coffeeSplit.cat34.zakladki}</span>
-                    </div>
-                  </div>
-
-                  {/* Штат */}
-                  <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-amber-300/80">Персонал</p>
-                        <p className="text-sm font-semibold text-white">Кава штат</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-lg font-bold text-white">{coffeeSplit.cat47.qty}</p>
+                      <div className="grid grid-cols-4 gap-2 text-xl">
+                        <div className="text-center">
+                          <p className="text-gray-400 mb-1 text-xs">Виручка</p>
+                          <p className="font-bold text-white">{money(revenueUAH)}₴</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-400 mb-1 text-xs">Чеки</p>
+                          <p className="font-bold text-white">{checks}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-400 mb-1 text-xs">Серед</p>
+                          <p className="font-bold text-white">{money(avgDay)}₴</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-400 mb-1 text-xs">Міс</p>
+                          <p className="font-semibold text-gray-300">
+                            {avgMonth != null ? `${money(avgMonth)}₴` : "—"}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                    <div className="flex justify-between items-center mt-1 pt-1 border-t border-amber-700/30">
-                      <span className="text-xs text-amber-300/60">Закладок</span>
-                      <span className="text-sm font-bold text-amber-300">{coffeeSplit.cat47.zakladki}</span>
-                    </div>
-                  </div>
-
-                  {/* Итого */}
-                  <div className="bg-gray-900/60 border-2 border-orange-600/40 rounded-lg px-3 py-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-bold text-orange-400">Всього</p>
-                      <p className="text-xl font-bold text-orange-400">{coffeeSplit.overall.qty}</p>
-                    </div>
-                    <div className="flex justify-between items-center mt-1 pt-1 border-t border-orange-600/30">
-                      <span className="text-xs text-gray-300">Закладок</span>
-                      <span className="text-base font-bold text-orange-400">{coffeeSplit.overall.zakladki}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+                  );
+                })}
             </div>
-
-            {/* -------- CENTER: Employees (one block, table) -------- */}
-            <div className="lg:col-span-5">
-              <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-700">
-                  <h2 className="font-bold text-white text-base">👥 Співробітники</h2>
-                  <p className="text-gray-400 text-xs">Продажі за {dateInputValue(date)}</p>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-700 text-xs text-gray-400 uppercase">
-                        <th className="text-left px-4 py-2 font-medium">Ім'я</th>
-                        <th className="text-right px-3 py-2 font-medium">Виручка</th>
-                        <th className="text-right px-3 py-2 font-medium">Чеки</th>
-                        <th className="text-right px-3 py-2 font-medium">Серед</th>
-                        <th className="text-right px-4 py-2 font-medium">Міс</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedEmployees.map((w, idx) => {
-                        const uid = w.user_id;
-                        const revenueUAH = Number(w.revenue || 0) / 100;
-                        const checks = Number(w.clients || 0);
-                        const avgDay = checks > 0 ? revenueUAH / checks : 0;
-                        const avgMonth = avgPerMonthMap[uid];
-                        const isBar = w.name?.toLowerCase().includes("бар");
-
-                        return (
-                          <tr
-                            key={uid}
-                            className={`border-b border-gray-700/50 hover:bg-gray-700/30 transition-colors ${
-                              idx === 0 ? "bg-gray-700/20" : ""
-                            }`}
-                          >
-                            <td className="px-4 py-3">
-                              <p className="font-semibold text-white text-sm">{w.name || "—"}</p>
-                              <p className="text-xs text-gray-400">{isBar ? "Бармен" : "Офіціант"}</p>
-                            </td>
-                            <td className="text-right px-3 py-3">
-                              <p className="font-bold text-white text-base">{money(revenueUAH)}₴</p>
-                            </td>
-                            <td className="text-right px-3 py-3">
-                              <p className="font-bold text-white text-base">{checks}</p>
-                            </td>
-                            <td className="text-right px-3 py-3">
-                              <p className="font-bold text-white text-base">{money(avgDay)}₴</p>
-                            </td>
-                            <td className="text-right px-4 py-3">
-                              <p className="font-semibold text-gray-300 text-base">
-                                {avgMonth != null ? `${money(avgMonth)}₴` : "—"}
-                              </p>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-
-                    {/* Footer totals */}
-                    <tfoot>
-                      <tr className="bg-gray-700/30 border-t-2 border-gray-600">
-                        <td className="px-4 py-3">
-                          <p className="font-bold text-white text-sm">Разом</p>
-                        </td>
-                        <td className="text-right px-3 py-3">
-                          <p className="font-bold text-green-400 text-base">{money(totals.totalRevenue)}₴</p>
-                        </td>
-                        <td className="text-right px-3 py-3">
-                          <p className="font-bold text-blue-400 text-base">{totals.totalChecks}</p>
-                        </td>
-                        <td className="text-right px-3 py-3">
-                          <p className="font-bold text-purple-400 text-base">{money(totals.avgCheck)}₴</p>
-                        </td>
-                        <td className="text-right px-4 py-3">
-                          <p className="text-gray-500 text-sm">—</p>
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-            </div>
-
-            {/* -------- RIGHT: Sauces & Extras -------- */}
-            <div className="lg:col-span-4">
-              <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-700">
-                  <h2 className="font-bold text-white text-base">🥫 Соуси та допи</h2>
-                  <p className="text-gray-400 text-xs">Виручка по співробітниках</p>
-                </div>
-
-                {SAUCE_CATEGORY_IDS.size === 0 ? (
-                  <div className="p-6 text-center">
-                    <p className="text-gray-400 text-sm">
-                      Потрібно налаштувати category_id соусів та допів
-                    </p>
-                  </div>
-                ) : saucesLoading ? (
-                  <div className="p-6 text-center">
-                    <RefreshCw className="w-5 h-5 text-gray-400 animate-spin mx-auto mb-2" />
-                    <p className="text-gray-400 text-sm">Завантаження...</p>
-                  </div>
-                ) : saucesData ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b border-gray-700 text-xs text-gray-400 uppercase">
-                          <th className="text-left px-4 py-2 font-medium">Ім'я</th>
-                          <th className="text-right px-3 py-2 font-medium">Сьогодні</th>
-                          <th className="text-right px-4 py-2 font-medium">Місяць</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(saucesData.day?.by_waiter || []).map((w) => {
-                          const monthRow = (saucesData.month?.by_waiter || []).find(
-                            (m) => m.user_id === w.user_id
-                          );
-                          return (
-                            <tr
-                              key={w.user_id}
-                              className="border-b border-gray-700/50 hover:bg-gray-700/30 transition-colors"
-                            >
-                              <td className="px-4 py-3">
-                                <p className="font-semibold text-white text-sm">{w.name || "—"}</p>
-                              </td>
-                              <td className="text-right px-3 py-3">
-                                <p className="font-bold text-white text-base">
-                                  {money(w.totalRevenue ?? w.revenue ?? 0)}₴
-                                </p>
-                              </td>
-                              <td className="text-right px-4 py-3">
-                                <p className="font-semibold text-gray-300 text-base">
-                                  {money(monthRow?.totalRevenue ?? monthRow?.revenue ?? 0)}₴
-                                </p>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                      <tfoot>
-                        <tr className="bg-gray-700/30 border-t-2 border-gray-600">
-                          <td className="px-4 py-3">
-                            <p className="font-bold text-white text-sm">Разом</p>
-                          </td>
-                          <td className="text-right px-3 py-3">
-                            <p className="font-bold text-green-400 text-base">
-                              {money(saucesData.day?.total?.revenue || 0)}₴
-                            </p>
-                          </td>
-                          <td className="text-right px-4 py-3">
-                            <p className="font-bold text-green-400 text-base">
-                              {money(saucesData.month?.total?.revenue || 0)}₴
-                            </p>
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="p-6 text-center">
-                    <p className="text-gray-500 text-sm">Немає даних</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
           </div>
         )}
 
-        {/* Empty state */}
         {!loading && daySales.length === 0 && !error && (
-          <div className="bg-gray-800 rounded-xl p-8 border border-gray-700 text-center">
+          <div className="bg-gray-800 rounded-xl p-8 shadow-lg border border-gray-700 text-center">
             <Users className="w-16 h-16 text-gray-600 mx-auto mb-4" />
             <h3 className="font-semibold text-white mb-2">Немає даних</h3>
             <p className="text-gray-400 text-sm">Дані по продажам не знайдено</p>
@@ -591,8 +548,8 @@ export default function App() {
         )}
       </div>
 
-      <div className="text-center py-3">
-        <p className="text-gray-600 text-xs font-medium">GRECO Tech™</p>
+      <div className="text-center py-4">
+        <p className="text-gray-500 text-xs font-medium">GRECO Tech™</p>
       </div>
     </div>
   );
