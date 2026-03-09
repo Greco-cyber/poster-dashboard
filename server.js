@@ -81,9 +81,10 @@ async function ensureCategories() {
   }
 }
 
-// -------------------- КЭШ: продукты --------------------
+// -------------------- КЭШ: продукты + модификаторы --------------------
 let PRODUCTS_CACHE_AT = 0;
-let PRODUCT_INFO = new Map(); // pid -> { name, category_id }
+let PRODUCT_INFO = new Map(); // pid -> { name, category_id, basePrice }
+let MOD_INFO = new Map();     // dish_modification_id -> { name, price }
 const PRODUCT_TTL_MS = 15 * 60 * 1000;
 
 async function ensureProducts() {
@@ -93,17 +94,51 @@ async function ensureProducts() {
   const j = await poster("menu.getProducts");
   const arr = Array.isArray(j?.response) ? j.response : [];
 
-  const map = new Map();
+  const productMap = new Map();
+  const modMap = new Map();
+
   for (const p of arr) {
     const pid = Number(p.product_id ?? p.id ?? p.menu_id ?? p.good_id);
     const cid = Number(p.menu_category_id ?? p.category_id ?? p.group_id ?? p.category);
     const name = String(p.product_name ?? p.name ?? "");
+
+    let basePrice = 0;
+    const priceObj = p.price;
+    if (priceObj && typeof priceObj === "object") {
+      const firstVal = Object.values(priceObj)[0];
+      basePrice = Number(firstVal) || 0;
+    } else {
+      basePrice = Number(priceObj ?? 0) || 0;
+    }
+
     if (Number.isFinite(pid)) {
-      map.set(pid, { name, category_id: Number.isFinite(cid) ? cid : null });
+      productMap.set(pid, {
+        name,
+        category_id: Number.isFinite(cid) ? cid : null,
+        basePrice,
+      });
+    }
+
+    const groups = Array.isArray(p.group_modifications) ? p.group_modifications : [];
+    for (const g of groups) {
+      const mods = Array.isArray(g.modifications) ? g.modifications : [];
+      for (const m of mods) {
+        const modId = Number(m.dish_modification_id ?? m.modification_id ?? m.id);
+        const modName = String(m.name ?? "");
+        const modPriceUAH = Number(m.price ?? 0) || 0;
+
+        if (Number.isFinite(modId)) {
+          modMap.set(modId, {
+            name: modName,
+            price: modPriceUAH,
+          });
+        }
+      }
     }
   }
 
-  PRODUCT_INFO = map;
+  PRODUCT_INFO = productMap;
+  MOD_INFO = modMap;
   PRODUCTS_CACHE_AT = now;
 }
 
@@ -284,6 +319,150 @@ app.get("/api/bar-sales", async (req, res) => {
         by_product: [...byProduct.values()].sort((a, b) => b.qty - a.qty),
       },
       debug: { usedProductsSales: prodSales.used || null },
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error", detail: String(e) });
+  }
+});
+
+// -------------------- SAUCES & EXTRAS (допи) --------------------
+// Категория "ДОПИ" в Poster = category_id 37
+const SAUCE_CATEGORY_IDS = new Set([37, 41]);
+
+app.get("/api/sauces-sales", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
+
+    await ensureProducts();
+
+    // product_id отдельных допов/соусов из категорий ДОПИ / ДОПИ БАР
+    const sauceProductIds = new Set();
+    for (const [pid, info] of PRODUCT_INFO.entries()) {
+      if (SAUCE_CATEGORY_IDS.has(info.category_id)) {
+        sauceProductIds.add(pid);
+      }
+    }
+
+    // Загружаем все закрытые чеки с товарами за период
+    let allTransactions = [];
+    let nextTr = null;
+    let safetyLimit = 20;
+
+    while (safetyLimit-- > 0) {
+      const params = {
+        dateFrom,
+        dateTo,
+        status: 2,
+        include_products: true,
+      };
+      if (nextTr) params.next_tr = nextTr;
+
+      const j = await poster("dash.getTransactions", params);
+      const batch = Array.isArray(j?.response) ? j.response : [];
+
+      if (!batch.length) break;
+
+      allTransactions = allTransactions.concat(batch);
+
+      if (batch.length < 100) break;
+      nextTr = batch[batch.length - 1].transaction_id;
+    }
+
+    const byWaiter = new Map();
+
+    let totalProductsSeen = 0;
+    let matchedProducts = 0;
+    let matchedModifiers = 0;
+    let modifiersWithoutPrice = 0;
+
+    function ensureWaiter(uid, name) {
+      if (!byWaiter.has(uid)) {
+        byWaiter.set(uid, {
+          user_id: uid,
+          name,
+          revenue: 0,
+          qty: 0,
+          modRevenue: 0,
+          modQty: 0,
+        });
+      }
+      return byWaiter.get(uid);
+    }
+
+    for (const tr of allTransactions) {
+      const uid = String(tr.user_id ?? "");
+      const waiterName = tr.name || "—";
+      const products = Array.isArray(tr.products) ? tr.products : [];
+
+      for (const p of products) {
+        const pid = Number(p.product_id);
+        const modId = Number(p.modification_id || 0);
+        const productQty = Number(p.num ?? 1) || 1;
+        const linePriceKopecs = Number(p.product_price ?? 0) || 0;
+
+        totalProductsSeen++;
+
+        const w = ensureWaiter(uid, waiterName);
+
+        // 1) Отдельный товар из категорий ДОПИ / ДОПИ БАР
+        if (sauceProductIds.has(pid)) {
+          matchedProducts++;
+          w.revenue += linePriceKopecs;
+          w.qty += productQty;
+        }
+
+        // 2) Платный модификатор — по реальной цене из меню
+        if (modId !== 0) {
+          const modInfo = MOD_INFO.get(modId);
+
+          if (modInfo && modInfo.price > 0) {
+            matchedModifiers++;
+            const modLineKopecs = Math.round(modInfo.price * 100 * productQty);
+            w.modRevenue += modLineKopecs;
+            w.modQty += productQty;
+          } else {
+            modifiersWithoutPrice++;
+          }
+        }
+      }
+    }
+
+    const result = [...byWaiter.values()]
+      .map((w) => ({
+        user_id: w.user_id,
+        name: w.name,
+        revenue: Math.round(w.revenue / 100),
+        qty: w.qty,
+        modRevenue: Math.round(w.modRevenue / 100),
+        modQty: w.modQty,
+        totalRevenue: Math.round((w.revenue + w.modRevenue) / 100),
+        totalQty: w.qty + w.modQty,
+      }))
+      .filter((w) => w.totalRevenue > 0 || w.totalQty > 0)
+      .sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+    const totalRevenue = result.reduce((s, w) => s + w.totalRevenue, 0);
+    const totalQty = result.reduce((s, w) => s + w.totalQty, 0);
+
+    res.json({
+      dateFrom,
+      dateTo,
+      by_waiter: result,
+      total: { revenue: totalRevenue, qty: totalQty },
+      debug: {
+        sauceCategoryIds: [...SAUCE_CATEGORY_IDS],
+        sauceProductCount: sauceProductIds.size,
+        totalProductsInCache: PRODUCT_INFO.size,
+        totalModifiersInCache: MOD_INFO.size,
+        transactionsCount: allTransactions.length,
+        totalProductsSeen,
+        matchedProducts,
+        matchedModifiers,
+        modifiersWithoutPrice,
+      },
     });
   } catch (e) {
     console.error(e);
