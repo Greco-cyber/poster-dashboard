@@ -338,6 +338,7 @@ app.get("/api/sauces-sales", async (req, res) => {
     await ensureProducts();
 
     // product_id які належать категоріям допів (37, 41)
+    // basePrice в цих продуктів — в копійках (як і product_price в чеку)
     const sauceProductIds = new Set();
     for (const [pid, info] of PRODUCT_INFO.entries()) {
       if (SAUCE_CATEGORY_IDS.has(info.category_id)) sauceProductIds.add(pid);
@@ -367,9 +368,9 @@ app.get("/api/sauces-sales", async (req, res) => {
         byWaiter.set(uid, {
           user_id: uid,
           name,
-          productRevenueKopecs: 0, // від товарів кат. 37/41
+          productRevenueKopecs: 0, // від товарів-допів кат. 37/41
           productQty: 0,
-          modRevenueKopecs: 0,     // від модифікаторів (різниця ціни)
+          modRevenueKopecs: 0,     // від платних модифікаторів (ціна з MOD_INFO × qty)
           modQty: 0,
         });
       }
@@ -389,24 +390,24 @@ app.get("/api/sauces-sales", async (req, res) => {
         const w = ensureWaiter(uid, waiterName);
 
         // 1) Окремий товар-доп з категорії 37/41
-        //    product_price вже фінальна сума рядка (× num, з модифікатором якщо є)
+        //    product_price = фінальна сума рядка в копійках (вже × qty)
         if (sauceProductIds.has(pid)) {
           w.productRevenueKopecs += linePriceKopecs;
           w.productQty += qty;
           statProducts++;
-          continue; // далі не перевіряємо модифікатор щоб не рахувати двічі
+          continue; // не рахуємо модифікатор двічі
         }
 
-        // 2) Товар з модифікатором (чебурек + Мікс Сирів тощо)
-        //    Рахуємо тільки різницю: product_price - basePrice × qty
-        //    Це точна сума всіх допів на рядку, незалежно від кількості модів
+        // 2) Платний модифікатор на звичайному товарі (чебурек + Мікс Сирів тощо)
+        //    Poster НЕ збільшує product_price при додаванні мода —
+        //    тому беремо ціну мода напряму з MOD_INFO (в гривнях) і переводимо в копійки
         if (modId !== 0) {
-          const info = PRODUCT_INFO.get(pid);
-          // basePrice з Poster приходить в гривнях, product_price в чеку — в копійках
-          const basePriceKopecs = info ? Math.round(info.basePrice * 100) : 0;
-          const diffKopecs = linePriceKopecs - basePriceKopecs * qty;
-          if (diffKopecs > 0) {
-            w.modRevenueKopecs += diffKopecs;
+          const modInfo = MOD_INFO.get(modId);
+          const modPriceUAH = modInfo ? modInfo.price : 0;
+          // Ігноруємо безкоштовні (0.01₴) і нульові моди — це соуси/добавки без ціни
+          if (modPriceUAH >= 1) {
+            const modRevenueKopecs = Math.round(modPriceUAH * 100) * qty;
+            w.modRevenueKopecs += modRevenueKopecs;
             w.modQty += qty;
             statMods++;
           }
