@@ -7,7 +7,7 @@ app.use(cors());
 
 const fetchFn = global.fetch;
 
-// Берем значения либо из нормальных переменных, либо из REACT_APP_* (как у тебя сейчас в Render)
+// Берем значения либо из POSTER_*, либо из REACT_APP_* (как у тебя в Render)
 const TOKEN =
   process.env.POSTER_TOKEN ||
   process.env.REACT_APP_POSTER_TOKEN ||
@@ -18,8 +18,7 @@ const ACCOUNT =
   process.env.REACT_APP_POSTER_ACCOUNT ||
   "";
 
-// Если POSTER_BASE_URL не задан, пробуем собрать его из ACCOUNT.
-// В Poster часто используется https://{account}.joinposter.com/api
+// Если POSTER_BASE_URL не задан, пробуем собрать его из ACCOUNT
 const POSTER_BASE =
   process.env.POSTER_BASE_URL ||
   process.env.REACT_APP_POSTER_BASE_URL ||
@@ -34,6 +33,7 @@ function todayYYYYMMDD() {
 async function poster(method, params = {}) {
   const url = new URL(`${POSTER_BASE}/${method}`);
   url.searchParams.set("token", TOKEN);
+
   for (const [k, v] of Object.entries(params)) {
     if (v != null) url.searchParams.set(k, String(v));
   }
@@ -61,33 +61,24 @@ async function ensureCategories() {
   const now = Date.now();
   if (CAT_NAME.size && now - CATS_CACHE_AT < CATS_TTL_MS) return;
 
-  // Самый типичный метод в Poster
-  const candidates = ["menu.getCategories"];
+  try {
+    const j = await poster("menu.getCategories");
+    const arr = Array.isArray(j?.response) ? j.response : [];
+    const map = new Map();
 
-  for (const m of candidates) {
-    try {
-      const j = await poster(m);
-      const arr = Array.isArray(j?.response) ? j.response : [];
-      if (!arr.length) continue;
-
-      const map = new Map();
-      for (const c of arr) {
-        const cid = Number(c.category_id ?? c.id ?? c.menu_category_id);
-        const name = String(c.category_name ?? c.name ?? "");
-        if (Number.isFinite(cid)) map.set(cid, name);
-      }
-
-      if (map.size) {
-        CAT_NAME = map;
-        CATS_CACHE_AT = now;
-        return;
-      }
-    } catch {
-      // try next (если добавишь варианты)
+    for (const c of arr) {
+      const cid = Number(c.category_id ?? c.id ?? c.menu_category_id);
+      const name = String(c.category_name ?? c.name ?? "");
+      if (Number.isFinite(cid)) map.set(cid, name);
     }
-  }
 
-  // если не удалось — оставим пустым, названия будем подставлять fallback'ом
+    if (map.size) {
+      CAT_NAME = map;
+      CATS_CACHE_AT = now;
+    }
+  } catch {
+    // ignore
+  }
 }
 
 // -------------------- КЭШ: продукты --------------------
@@ -132,8 +123,6 @@ app.get("/api/waiters-sales", async (req, res) => {
 
 // -------------------- ПРОДАЖИ ПО ТОВАРАМ (для кофе) --------------------
 async function fetchProductsSales({ dateFrom, dateTo }) {
-  // На разных аккаунтах Poster может отличаться метод/структура.
-  // Пробуем несколько вариантов.
   const methods = [
     { m: "dash.getProductsSales", p: { dateFrom, dateTo } },
     { m: "dash.getProductsSales", p: {} },
@@ -180,12 +169,13 @@ app.get("/api/bar-sales", async (req, res) => {
 
     const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
 
-    // 1) Категории 9/14/34: количество (название берем из menu.getCategories)
+    // Категории бара
     const BAR_CATS = [9, 14, 34];
     const want = new Set(BAR_CATS);
 
     await ensureCategories();
 
+    // 1) Categories qty + name
     let categories = BAR_CATS.map((cid) => ({
       category_id: cid,
       name: CAT_NAME.get(cid) || `Категорія ${cid}`,
@@ -201,7 +191,6 @@ app.get("/api/bar-sales", async (req, res) => {
         const cid = Number(x.category_id);
         if (!want.has(cid)) continue;
 
-        // иногда в ответе есть category_name, иногда нет
         const nameFromDash = String(x.category_name ?? x.name ?? "");
         const name = CAT_NAME.get(cid) || nameFromDash || `Категорія ${cid}`;
 
@@ -218,10 +207,11 @@ app.get("/api/bar-sales", async (req, res) => {
         qty: 0,
       });
     } catch {
-      // оставляем нули
+      // keep defaults
     }
 
-    // 2) Кофе: закладки по продуктам (кат.34 + кат.47), 530 = 2
+    // 2) Coffee shots mapping (кат.34 + кат.47)
+    // ✅ 530=1, 531=2, 423=2
     const shotsPerProduct = new Map([
       // cat 34
       [230, 1],
@@ -233,9 +223,18 @@ app.get("/api/bar-sales", async (req, res) => {
       [183, 1],
       [182, 1],
       [317, 1],
-      // cat 47
+
+      // ✅ кава в зал
+      [425, 1],
+      [424, 1],
+      [441, 1],
+      [422, 1],
+      [423, 2],
+
+      // cat 47 (штат)
       [529, 1],
-      [530, 2], // ✅
+      [530, 1], // 🔁
+      [531, 2], // ✅
       [533, 1],
       [534, 1],
       [535, 1],
