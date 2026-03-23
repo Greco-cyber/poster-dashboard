@@ -448,6 +448,40 @@ app.get("/api/sauces-sales", async (req, res) => {
   }
 });
 
+// -------------------- DEBUG: які продукти в sauceProductIds --------------------
+app.get("/api/debug-sauce-products", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+    await ensureProducts();
+
+    const sauceProductIds = new Set();
+    const sauceProducts = [];
+    for (const [pid, info] of PRODUCT_INFO.entries()) {
+      if (SAUCE_CATEGORY_IDS.has(info.category_id)) {
+        sauceProductIds.add(pid);
+        sauceProducts.push({ pid, name: info.name, category_id: info.category_id, basePrice: info.basePrice });
+      }
+    }
+    sauceProducts.sort((a, b) => a.category_id - b.category_id || a.pid - b.pid);
+
+    // Перевіримо конкретні product_id з чеку Сергія: 528, 53, 144
+    const checkIds = [528, 53, 144];
+    const checkInfo = checkIds.map(id => ({
+      product_id: id,
+      info: PRODUCT_INFO.get(id) || null,
+      inSauceSet: sauceProductIds.has(id),
+    }));
+
+    res.json({
+      sauceProductCount: sauceProductIds.size,
+      sauceProducts,
+      checkSpecific: checkInfo,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 // -------------------- DEBUG: платні модифікатори з меню --------------------
 app.get("/api/debug-mods-menu", async (req, res) => {
   try {
