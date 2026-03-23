@@ -7,7 +7,6 @@ app.use(cors());
 
 const fetchFn = global.fetch;
 
-// Берем значения либо из POSTER_*, либо из REACT_APP_* (как у тебя в Render)
 const TOKEN =
   process.env.POSTER_TOKEN ||
   process.env.REACT_APP_POSTER_TOKEN ||
@@ -18,7 +17,6 @@ const ACCOUNT =
   process.env.REACT_APP_POSTER_ACCOUNT ||
   "";
 
-// Если POSTER_BASE_URL не задан, пробуем собрать его из ACCOUNT
 const POSTER_BASE =
   process.env.POSTER_BASE_URL ||
   process.env.REACT_APP_POSTER_BASE_URL ||
@@ -54,7 +52,7 @@ async function poster(method, params = {}) {
 
 // -------------------- КЭШ: категории --------------------
 let CATS_CACHE_AT = 0;
-let CAT_NAME = new Map(); // cid -> name
+let CAT_NAME = new Map();
 const CATS_TTL_MS = 30 * 60 * 1000;
 
 async function ensureCategories() {
@@ -83,8 +81,8 @@ async function ensureCategories() {
 
 // -------------------- КЭШ: продукты + модификаторы --------------------
 let PRODUCTS_CACHE_AT = 0;
-let PRODUCT_INFO = new Map(); // pid -> { name, category_id, basePrice }
-let MOD_INFO = new Map();     // dish_modification_id -> { name, price }
+let PRODUCT_INFO = new Map();
+let MOD_INFO = new Map();
 const PRODUCT_TTL_MS = 15 * 60 * 1000;
 
 async function ensureProducts() {
@@ -204,13 +202,11 @@ app.get("/api/bar-sales", async (req, res) => {
 
     const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
 
-    // Категории бара
     const BAR_CATS = [9, 14, 34];
     const want = new Set(BAR_CATS);
 
     await ensureCategories();
 
-    // 1) Categories qty + name
     let categories = BAR_CATS.map((cid) => ({
       category_id: cid,
       name: CAT_NAME.get(cid) || `Категорія ${cid}`,
@@ -245,34 +241,11 @@ app.get("/api/bar-sales", async (req, res) => {
       // keep defaults
     }
 
-    // 2) Coffee shots mapping (кат.34 + кат.47)
-    // ✅ 530=1, 531=2, 423=2
     const shotsPerProduct = new Map([
-      // cat 34
-      [230, 1],
-      [485, 1],
-      [307, 2],
-      [231, 1],
-      [316, 1],
-      [406, 1],
-      [183, 1],
-      [182, 1],
-      [317, 1],
-
-      // ✅ кава в зал
-      [425, 1],
-      [424, 1],
-      [441, 1],
-      [422, 1],
-      [423, 2],
-
-      // cat 47 (штат)
-      [529, 1],
-      [530, 1], // 🔁
-      [531, 2], // ✅
-      [533, 1],
-      [534, 1],
-      [535, 1],
+      [230, 1], [485, 1], [307, 2], [231, 1], [316, 1],
+      [406, 1], [183, 1], [182, 1], [317, 1],
+      [425, 1], [424, 1], [441, 1], [422, 1], [423, 2],
+      [529, 1], [530, 1], [531, 2], [533, 1], [534, 1], [535, 1],
     ]);
 
     await ensureProducts();
@@ -327,7 +300,6 @@ app.get("/api/bar-sales", async (req, res) => {
 });
 
 // -------------------- SAUCES & EXTRAS (допи) --------------------
-// Категория "ДОПИ" в Poster = category_id 37
 const SAUCE_CATEGORY_IDS = new Set([37, 41]);
 
 app.get("/api/sauces-sales", async (req, res) => {
@@ -338,7 +310,6 @@ app.get("/api/sauces-sales", async (req, res) => {
 
     await ensureProducts();
 
-    // product_id отдельных допов/соусов из категорий ДОПИ / ДОПИ БАР
     const sauceProductIds = new Set();
     for (const [pid, info] of PRODUCT_INFO.entries()) {
       if (SAUCE_CATEGORY_IDS.has(info.category_id)) {
@@ -346,7 +317,6 @@ app.get("/api/sauces-sales", async (req, res) => {
       }
     }
 
-    // Загружаем все закрытые чеки с товарами за период
     let allTransactions = [];
     let nextTr = null;
     let safetyLimit = 20;
@@ -407,14 +377,12 @@ app.get("/api/sauces-sales", async (req, res) => {
 
         const w = ensureWaiter(uid, waiterName);
 
-        // 1) Отдельный товар из категорий ДОПИ / ДОПИ БАР
         if (sauceProductIds.has(pid)) {
           matchedProducts++;
           w.revenue += linePriceKopecs;
           w.qty += productQty;
         }
 
-        // 2) Платный модификатор — по реальной цене из меню
         if (modId !== 0) {
           const modInfo = MOD_INFO.get(modId);
 
@@ -470,38 +438,62 @@ app.get("/api/sauces-sales", async (req, res) => {
   }
 });
 
-// -------------------- DEBUG: модификаторы --------------------
+// -------------------- DEBUG: структура чека с модификаторами --------------------
 app.get("/api/debug-mods", async (req, res) => {
   try {
-    await ensureProducts();
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
 
-    const cacheSample = [...MOD_INFO.entries()].slice(0, 20).map(([id, m]) => ({ id, ...m }));
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
 
-    const { dateFrom = todayYYYYMMDD() } = req.query;
-    const tr = await poster("dash.getTransactions", { dateFrom, dateTo: dateFrom, status: 2, include_products: true });
-    const transactions = Array.isArray(tr?.response) ? tr.response : [];
+    const j = await poster("dash.getTransactions", {
+      dateFrom,
+      dateTo,
+      status: 2,
+      include_products: true,
+    });
 
-    const modIdsInChecks = new Set();
-    for (const t of transactions) {
-      for (const p of Array.isArray(t.products) ? t.products : []) {
-        const modId = Number(p.modification_id || 0);
-        if (modId !== 0) modIdsInChecks.add(modId);
-      }
+    const batch = Array.isArray(j?.response) ? j.response : [];
+
+    // Чек где в products есть modification_id != 0
+    const withMods = batch.find(
+      (tr) =>
+        Array.isArray(tr.products) &&
+        tr.products.some((p) => p.modification_id && Number(p.modification_id) !== 0)
+    );
+
+    // Запасной: первый чек с товарами
+    const fallback = batch.find(
+      (tr) => Array.isArray(tr.products) && tr.products.length > 0
+    );
+
+    const target = withMods || fallback;
+
+    if (!target) {
+      return res.json({ message: "Нет закрытых чеков за этот день", total: batch.length });
     }
 
-    const resolved = [...modIdsInChecks].map(id => ({
-      id,
-      inCache: MOD_INFO.has(id),
-      info: MOD_INFO.get(id) || null
-    }));
-
     res.json({
-      totalModifiersInCache: MOD_INFO.size,
-      cacheSample,
-      modIdsInChecks: resolved
+      found_with_mod: !!withMods,
+      transaction_id: target.transaction_id,
+      waiter: target.name,
+      // Все ключи первого продукта — смотрим структуру
+      product_keys: target.products?.[0] ? Object.keys(target.products[0]) : [],
+      // Все строки чека целиком
+      products: target.products,
+      // Для сравнения: все уникальные modification_id во всём батче
+      all_mod_ids_in_batch: [
+        ...new Set(
+          batch.flatMap((tr) =>
+            (tr.products || [])
+              .map((p) => p.modification_id)
+              .filter((id) => id && Number(id) !== 0)
+          )
+        ),
+      ].slice(0, 30),
     });
   } catch (e) {
-    res.status(500).json({ error: String(e) });
+    console.error(e);
+    res.status(500).json({ error: "Server error", detail: String(e) });
   }
 });
 
