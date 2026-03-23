@@ -326,7 +326,7 @@ app.get("/api/bar-sales", async (req, res) => {
   }
 });
 
-// -------------------- SAUCES & EXTRAS (допи + платні модифікатори) --------------------
+// -------------------- SAUCES & EXTRAS (допи + модифікатори) --------------------
 const SAUCE_CATEGORY_IDS = new Set([37, 41]);
 
 app.get("/api/sauces-sales", async (req, res) => {
@@ -337,13 +337,13 @@ app.get("/api/sauces-sales", async (req, res) => {
 
     await ensureProducts();
 
-    // Збираємо product_id які належать категоріям допів (37, 41)
+    // product_id які належать категоріям допів (37, 41)
     const sauceProductIds = new Set();
     for (const [pid, info] of PRODUCT_INFO.entries()) {
       if (SAUCE_CATEGORY_IDS.has(info.category_id)) sauceProductIds.add(pid);
     }
 
-    // Всі закриті чеки з товарами за період (з пагінацією)
+    // Всі закриті чеки з товарами за період (пагінація)
     let allTransactions = [];
     let nextTr = null;
     let safetyLimit = 20;
@@ -351,10 +351,8 @@ app.get("/api/sauces-sales", async (req, res) => {
     while (safetyLimit-- > 0) {
       const params = { dateFrom, dateTo, status: 2, include_products: true };
       if (nextTr) params.next_tr = nextTr;
-
       const j = await poster("dash.getTransactions", params);
       const batch = Array.isArray(j?.response) ? j.response : [];
-
       if (!batch.length) break;
       allTransactions = allTransactions.concat(batch);
       if (batch.length < 100) break;
@@ -369,11 +367,9 @@ app.get("/api/sauces-sales", async (req, res) => {
         byWaiter.set(uid, {
           user_id: uid,
           name,
-          // виручка від окремих товарів-допів (кат. 37/41)
-          productRevenueKopecs: 0,
+          productRevenueKopecs: 0, // від товарів кат. 37/41
           productQty: 0,
-          // виручка від платних модифікаторів на будь-якому товарі
-          modRevenueKopecs: 0,
+          modRevenueKopecs: 0,     // від модифікаторів (різниця ціни)
           modQty: 0,
         });
       }
@@ -389,25 +385,28 @@ app.get("/api/sauces-sales", async (req, res) => {
         const pid = Number(p.product_id);
         const modId = Number(p.modification_id || 0);
         const qty = Math.round(Number(p.num ?? 1) || 1);
+        const linePriceKopecs = Number(p.product_price ?? 0) || 0;
         const w = ensureWaiter(uid, waiterName);
 
-        // 1) Товар з категорії ДОПИ / ДОПИ БАР
-        //    product_price = фінальна сума рядка в копійках (вже × num, вже з модифікатором)
+        // 1) Окремий товар-доп з категорії 37/41
+        //    product_price вже фінальна сума рядка (× num, з модифікатором якщо є)
         if (sauceProductIds.has(pid)) {
-          const linePriceKopecs = Number(p.product_price ?? 0) || 0;
           w.productRevenueKopecs += linePriceKopecs;
           w.productQty += qty;
           statProducts++;
+          continue; // далі не перевіряємо модифікатор щоб не рахувати двічі
         }
 
-        // 2) Платний модифікатор на БУДЬ-ЯКОМУ товарі (не з кат. 37/41 — щоб не рахувати двічі)
-        //    Ціна модифікатора береться з кешу меню (MOD_INFO), бо в чеку її немає окремо
-        if (modId !== 0 && !sauceProductIds.has(pid)) {
-          const modInfo = MOD_INFO.get(modId);
-          if (modInfo && modInfo.price > 0) {
-            // modInfo.price в гривнях → переводимо в копійки × кількість
-            const modLinePriceKopecs = Math.round(modInfo.price * 100) * qty;
-            w.modRevenueKopecs += modLinePriceKopecs;
+        // 2) Товар з модифікатором (чебурек + Мікс Сирів тощо)
+        //    Рахуємо тільки різницю: product_price - basePrice × qty
+        //    Це точна сума всіх допів на рядку, незалежно від кількості модів
+        if (modId !== 0) {
+          const info = PRODUCT_INFO.get(pid);
+          // basePrice з Poster вже в копійках (як і product_price в чеку)
+          const basePriceKopecs = info ? Math.round(info.basePrice) : 0;
+          const diffKopecs = linePriceKopecs - basePriceKopecs * qty;
+          if (diffKopecs > 0) {
+            w.modRevenueKopecs += diffKopecs;
             w.modQty += qty;
             statMods++;
           }
@@ -421,7 +420,6 @@ app.get("/api/sauces-sales", async (req, res) => {
         name: w.name,
         revenue: Math.round((w.productRevenueKopecs + w.modRevenueKopecs) / 100),
         qty: w.productQty + w.modQty,
-        // деталізація для дебагу
         productRevenue: Math.round(w.productRevenueKopecs / 100),
         modRevenue: Math.round(w.modRevenueKopecs / 100),
       }))
@@ -439,7 +437,6 @@ app.get("/api/sauces-sales", async (req, res) => {
       debug: {
         sauceCategoryIds: [...SAUCE_CATEGORY_IDS],
         sauceProductCount: sauceProductIds.size,
-        modifiersInMenu: MOD_INFO.size,
         transactionsCount: allTransactions.length,
         matchedProductLines: statProducts,
         matchedModifierLines: statMods,
