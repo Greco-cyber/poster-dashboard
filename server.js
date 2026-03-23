@@ -326,8 +326,7 @@ app.get("/api/bar-sales", async (req, res) => {
   }
 });
 
-// -------------------- SAUCES & EXTRAS (допи) --------------------
-// Категория "ДОПИ" в Poster = category_id 37
+// -------------------- SAUCES & EXTRAS (допи + платні модифікатори) --------------------
 const SAUCE_CATEGORY_IDS = new Set([37, 41]);
 
 app.get("/api/sauces-sales", async (req, res) => {
@@ -338,51 +337,44 @@ app.get("/api/sauces-sales", async (req, res) => {
 
     await ensureProducts();
 
-    // product_id отдельных допов/соусов из категорий ДОПИ / ДОПИ БАР
+    // Збираємо product_id які належать категоріям допів (37, 41)
     const sauceProductIds = new Set();
     for (const [pid, info] of PRODUCT_INFO.entries()) {
-      if (SAUCE_CATEGORY_IDS.has(info.category_id)) {
-        sauceProductIds.add(pid);
-      }
+      if (SAUCE_CATEGORY_IDS.has(info.category_id)) sauceProductIds.add(pid);
     }
 
-    // Загружаем все закрытые чеки с товарами за период
+    // Всі закриті чеки з товарами за період (з пагінацією)
     let allTransactions = [];
     let nextTr = null;
     let safetyLimit = 20;
 
     while (safetyLimit-- > 0) {
-      const params = {
-        dateFrom,
-        dateTo,
-        status: 2,
-        include_products: true,
-      };
+      const params = { dateFrom, dateTo, status: 2, include_products: true };
       if (nextTr) params.next_tr = nextTr;
 
       const j = await poster("dash.getTransactions", params);
       const batch = Array.isArray(j?.response) ? j.response : [];
 
       if (!batch.length) break;
-
       allTransactions = allTransactions.concat(batch);
-
       if (batch.length < 100) break;
       nextTr = batch[batch.length - 1].transaction_id;
     }
 
     const byWaiter = new Map();
-
-    let totalProductsSeen = 0;
-    let matchedLines = 0;
+    let statProducts = 0, statMods = 0;
 
     function ensureWaiter(uid, name) {
       if (!byWaiter.has(uid)) {
         byWaiter.set(uid, {
           user_id: uid,
           name,
-          revenueKopecs: 0,
-          qty: 0,
+          // виручка від окремих товарів-допів (кат. 37/41)
+          productRevenueKopecs: 0,
+          productQty: 0,
+          // виручка від платних модифікаторів на будь-якому товарі
+          modRevenueKopecs: 0,
+          modQty: 0,
         });
       }
       return byWaiter.get(uid);
@@ -394,21 +386,32 @@ app.get("/api/sauces-sales", async (req, res) => {
       const products = Array.isArray(tr.products) ? tr.products : [];
 
       for (const p of products) {
-        totalProductsSeen++;
-
         const pid = Number(p.product_id);
-        if (!sauceProductIds.has(pid)) continue;
-
-        matchedLines++;
-
-        // product_price в Poster — уже финальная сумма СТРОКИ в копейках
-        // (включает модификатор, уже умножено на num внутри Poster)
-        const linePriceKopecs = Number(p.product_price ?? 0) || 0;
+        const modId = Number(p.modification_id || 0);
         const qty = Math.round(Number(p.num ?? 1) || 1);
-
         const w = ensureWaiter(uid, waiterName);
-        w.revenueKopecs += linePriceKopecs;
-        w.qty += qty;
+
+        // 1) Товар з категорії ДОПИ / ДОПИ БАР
+        //    product_price = фінальна сума рядка в копійках (вже × num, вже з модифікатором)
+        if (sauceProductIds.has(pid)) {
+          const linePriceKopecs = Number(p.product_price ?? 0) || 0;
+          w.productRevenueKopecs += linePriceKopecs;
+          w.productQty += qty;
+          statProducts++;
+        }
+
+        // 2) Платний модифікатор на БУДЬ-ЯКОМУ товарі (не з кат. 37/41 — щоб не рахувати двічі)
+        //    Ціна модифікатора береться з кешу меню (MOD_INFO), бо в чеку її немає окремо
+        if (modId !== 0 && !sauceProductIds.has(pid)) {
+          const modInfo = MOD_INFO.get(modId);
+          if (modInfo && modInfo.price > 0) {
+            // modInfo.price в гривнях → переводимо в копійки × кількість
+            const modLinePriceKopecs = Math.round(modInfo.price * 100) * qty;
+            w.modRevenueKopecs += modLinePriceKopecs;
+            w.modQty += qty;
+            statMods++;
+          }
+        }
       }
     }
 
@@ -416,8 +419,11 @@ app.get("/api/sauces-sales", async (req, res) => {
       .map((w) => ({
         user_id: w.user_id,
         name: w.name,
-        revenue: Math.round(w.revenueKopecs / 100),
-        qty: w.qty,
+        revenue: Math.round((w.productRevenueKopecs + w.modRevenueKopecs) / 100),
+        qty: w.productQty + w.modQty,
+        // деталізація для дебагу
+        productRevenue: Math.round(w.productRevenueKopecs / 100),
+        modRevenue: Math.round(w.modRevenueKopecs / 100),
       }))
       .filter((w) => w.revenue > 0 || w.qty > 0)
       .sort((a, b) => b.revenue - a.revenue);
@@ -433,15 +439,55 @@ app.get("/api/sauces-sales", async (req, res) => {
       debug: {
         sauceCategoryIds: [...SAUCE_CATEGORY_IDS],
         sauceProductCount: sauceProductIds.size,
-        totalProductsInCache: PRODUCT_INFO.size,
+        modifiersInMenu: MOD_INFO.size,
         transactionsCount: allTransactions.length,
-        totalProductsSeen,
-        matchedLines,
+        matchedProductLines: statProducts,
+        matchedModifierLines: statMods,
       },
     });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Server error", detail: String(e) });
+  }
+});
+
+// -------------------- DEBUG: платні модифікатори з меню --------------------
+app.get("/api/debug-mods-menu", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+    await ensureProducts();
+    const paid = [];
+    for (const [modId, info] of MOD_INFO.entries()) {
+      if (info.price > 0) paid.push({ modId, name: info.name, price: info.price });
+    }
+    paid.sort((a, b) => b.price - a.price);
+    res.json({ total: paid.length, paid_modifiers: paid });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// -------------------- DEBUG: чеки з модифікаторами --------------------
+app.get("/api/debug-mods", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
+    const j = await poster("dash.getTransactions", { dateFrom, dateTo, status: 2, include_products: true });
+    const batch = Array.isArray(j?.response) ? j.response : [];
+    const withMods = batch.find(tr => Array.isArray(tr.products) && tr.products.some(p => p.modification_id && Number(p.modification_id) !== 0));
+    const fallback = batch.find(tr => Array.isArray(tr.products) && tr.products.length > 0);
+    const target = withMods || fallback;
+    if (!target) return res.json({ message: "Немає закритих чеків за цей день", total: batch.length });
+    res.json({
+      found_with_mod: !!withMods,
+      transaction_id: target.transaction_id,
+      waiter: target.name,
+      product_keys: target.products?.[0] ? Object.keys(target.products[0]) : [],
+      products: target.products,
+      all_mod_ids_in_batch: [...new Set(batch.flatMap(tr => (tr.products || []).map(p => p.modification_id).filter(id => id && Number(id) !== 0)))].slice(0, 50),
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
   }
 });
 
