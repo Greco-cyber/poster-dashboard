@@ -300,6 +300,7 @@ app.get("/api/bar-sales", async (req, res) => {
 });
 
 // -------------------- SAUCES & EXTRAS (допи) --------------------
+// Категории допов/соусов в Poster
 const SAUCE_CATEGORY_IDS = new Set([37, 41]);
 
 app.get("/api/sauces-sales", async (req, res) => {
@@ -308,8 +309,10 @@ app.get("/api/sauces-sales", async (req, res) => {
 
     const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
 
+    // Загружаем кэш продуктов чтобы знать category_id каждого product_id
     await ensureProducts();
 
+    // Собираем Set product_id которые относятся к категориям допов/соусов
     const sauceProductIds = new Set();
     for (const [pid, info] of PRODUCT_INFO.entries()) {
       if (SAUCE_CATEGORY_IDS.has(info.category_id)) {
@@ -317,47 +320,37 @@ app.get("/api/sauces-sales", async (req, res) => {
       }
     }
 
+    // Загружаем все закрытые чеки с товарами за период (пагинация)
     let allTransactions = [];
     let nextTr = null;
     let safetyLimit = 20;
 
     while (safetyLimit-- > 0) {
-      const params = {
-        dateFrom,
-        dateTo,
-        status: 2,
-        include_products: true,
-      };
+      const params = { dateFrom, dateTo, status: 2, include_products: true };
       if (nextTr) params.next_tr = nextTr;
 
       const j = await poster("dash.getTransactions", params);
       const batch = Array.isArray(j?.response) ? j.response : [];
 
       if (!batch.length) break;
-
       allTransactions = allTransactions.concat(batch);
-
       if (batch.length < 100) break;
       nextTr = batch[batch.length - 1].transaction_id;
     }
 
+    // Считаем по официантам
+    // Логика: берём строки чека где product_id входит в sauceProductIds.
+    // product_price — это уже финальная цена строки в копейках (включая любой модификатор).
+    // Модификаторы на обычных товарах (чебурек + томаты) НЕ считаем отдельно —
+    // их цена уже вшита в product_price основного товара Poster-ом.
     const byWaiter = new Map();
 
     let totalProductsSeen = 0;
-    let matchedProducts = 0;
-    let matchedModifiers = 0;
-    let modifiersWithoutPrice = 0;
+    let matchedLines = 0;
 
     function ensureWaiter(uid, name) {
       if (!byWaiter.has(uid)) {
-        byWaiter.set(uid, {
-          user_id: uid,
-          name,
-          revenue: 0,
-          qty: 0,
-          modRevenue: 0,
-          modQty: 0,
-        });
+        byWaiter.set(uid, { user_id: uid, name, revenueKopecs: 0, qty: 0 });
       }
       return byWaiter.get(uid);
     }
@@ -368,33 +361,18 @@ app.get("/api/sauces-sales", async (req, res) => {
       const products = Array.isArray(tr.products) ? tr.products : [];
 
       for (const p of products) {
-        const pid = Number(p.product_id);
-        const modId = Number(p.modification_id || 0);
-        const productQty = Number(p.num ?? 1) || 1;
-        const linePriceKopecs = Number(p.product_price ?? 0) || 0;
-
         totalProductsSeen++;
 
+        const pid = Number(p.product_id);
+        if (!sauceProductIds.has(pid)) continue;
+
+        matchedLines++;
+        const qty = Number(p.num ?? 1) || 1;
+        const priceKopecs = Number(p.product_price ?? 0) || 0;
+
         const w = ensureWaiter(uid, waiterName);
-
-        if (sauceProductIds.has(pid)) {
-          matchedProducts++;
-          w.revenue += linePriceKopecs;
-          w.qty += productQty;
-        }
-
-        if (modId !== 0) {
-          const modInfo = MOD_INFO.get(modId);
-
-          if (modInfo && modInfo.price > 0) {
-            matchedModifiers++;
-            const modLineKopecs = Math.round(modInfo.price * 100 * productQty);
-            w.modRevenue += modLineKopecs;
-            w.modQty += productQty;
-          } else {
-            modifiersWithoutPrice++;
-          }
-        }
+        w.revenueKopecs += priceKopecs;
+        w.qty += qty;
       }
     }
 
@@ -402,18 +380,14 @@ app.get("/api/sauces-sales", async (req, res) => {
       .map((w) => ({
         user_id: w.user_id,
         name: w.name,
-        revenue: Math.round(w.revenue / 100),
+        revenue: Math.round(w.revenueKopecs / 100),
         qty: w.qty,
-        modRevenue: Math.round(w.modRevenue / 100),
-        modQty: w.modQty,
-        totalRevenue: Math.round((w.revenue + w.modRevenue) / 100),
-        totalQty: w.qty + w.modQty,
       }))
-      .filter((w) => w.totalRevenue > 0 || w.totalQty > 0)
-      .sort((a, b) => b.totalRevenue - a.totalRevenue);
+      .filter((w) => w.revenue > 0 || w.qty > 0)
+      .sort((a, b) => b.revenue - a.revenue);
 
-    const totalRevenue = result.reduce((s, w) => s + w.totalRevenue, 0);
-    const totalQty = result.reduce((s, w) => s + w.totalQty, 0);
+    const totalRevenue = result.reduce((s, w) => s + w.revenue, 0);
+    const totalQty = result.reduce((s, w) => s + w.qty, 0);
 
     res.json({
       dateFrom,
@@ -424,12 +398,9 @@ app.get("/api/sauces-sales", async (req, res) => {
         sauceCategoryIds: [...SAUCE_CATEGORY_IDS],
         sauceProductCount: sauceProductIds.size,
         totalProductsInCache: PRODUCT_INFO.size,
-        totalModifiersInCache: MOD_INFO.size,
         transactionsCount: allTransactions.length,
         totalProductsSeen,
-        matchedProducts,
-        matchedModifiers,
-        modifiersWithoutPrice,
+        matchedLines,
       },
     });
   } catch (e) {
