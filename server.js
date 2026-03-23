@@ -7,7 +7,7 @@ app.use(cors());
 
 const fetchFn = global.fetch;
 
-// Берем значения либо из POSTER_*, либо из REACT_APP_* (как у тебя в Render)
+// Берем значения либо из нормальных переменных, либо из REACT_APP_* (как у тебя сейчас в Render)
 const TOKEN =
   process.env.POSTER_TOKEN ||
   process.env.REACT_APP_POSTER_TOKEN ||
@@ -18,7 +18,8 @@ const ACCOUNT =
   process.env.REACT_APP_POSTER_ACCOUNT ||
   "";
 
-// Если POSTER_BASE_URL не задан, пробуем собрать его из ACCOUNT
+// Если POSTER_BASE_URL не задан, пробуем собрать его из ACCOUNT.
+// В Poster часто используется https://{account}.joinposter.com/api
 const POSTER_BASE =
   process.env.POSTER_BASE_URL ||
   process.env.REACT_APP_POSTER_BASE_URL ||
@@ -33,7 +34,6 @@ function todayYYYYMMDD() {
 async function poster(method, params = {}) {
   const url = new URL(`${POSTER_BASE}/${method}`);
   url.searchParams.set("token", TOKEN);
-
   for (const [k, v] of Object.entries(params)) {
     if (v != null) url.searchParams.set(k, String(v));
   }
@@ -61,30 +61,38 @@ async function ensureCategories() {
   const now = Date.now();
   if (CAT_NAME.size && now - CATS_CACHE_AT < CATS_TTL_MS) return;
 
-  try {
-    const j = await poster("menu.getCategories");
-    const arr = Array.isArray(j?.response) ? j.response : [];
-    const map = new Map();
+  // Самый типичный метод в Poster
+  const candidates = ["menu.getCategories"];
 
-    for (const c of arr) {
-      const cid = Number(c.category_id ?? c.id ?? c.menu_category_id);
-      const name = String(c.category_name ?? c.name ?? "");
-      if (Number.isFinite(cid)) map.set(cid, name);
-    }
+  for (const m of candidates) {
+    try {
+      const j = await poster(m);
+      const arr = Array.isArray(j?.response) ? j.response : [];
+      if (!arr.length) continue;
 
-    if (map.size) {
-      CAT_NAME = map;
-      CATS_CACHE_AT = now;
+      const map = new Map();
+      for (const c of arr) {
+        const cid = Number(c.category_id ?? c.id ?? c.menu_category_id);
+        const name = String(c.category_name ?? c.name ?? "");
+        if (Number.isFinite(cid)) map.set(cid, name);
+      }
+
+      if (map.size) {
+        CAT_NAME = map;
+        CATS_CACHE_AT = now;
+        return;
+      }
+    } catch {
+      // try next (если добавишь варианты)
     }
-  } catch {
-    // ignore
   }
+
+  // если не удалось — оставим пустым, названия будем подставлять fallback'ом
 }
 
-// -------------------- КЭШ: продукты + модификаторы --------------------
+// -------------------- КЭШ: продукты --------------------
 let PRODUCTS_CACHE_AT = 0;
-let PRODUCT_INFO = new Map(); // pid -> { name, category_id, basePrice }
-let MOD_INFO = new Map();     // dish_modification_id -> { name, price }
+let PRODUCT_INFO = new Map(); // pid -> { name, category_id }
 const PRODUCT_TTL_MS = 15 * 60 * 1000;
 
 async function ensureProducts() {
@@ -94,51 +102,17 @@ async function ensureProducts() {
   const j = await poster("menu.getProducts");
   const arr = Array.isArray(j?.response) ? j.response : [];
 
-  const productMap = new Map();
-  const modMap = new Map();
-
+  const map = new Map();
   for (const p of arr) {
     const pid = Number(p.product_id ?? p.id ?? p.menu_id ?? p.good_id);
     const cid = Number(p.menu_category_id ?? p.category_id ?? p.group_id ?? p.category);
     const name = String(p.product_name ?? p.name ?? "");
-
-    let basePrice = 0;
-    const priceObj = p.price;
-    if (priceObj && typeof priceObj === "object") {
-      const firstVal = Object.values(priceObj)[0];
-      basePrice = Number(firstVal) || 0;
-    } else {
-      basePrice = Number(priceObj ?? 0) || 0;
-    }
-
     if (Number.isFinite(pid)) {
-      productMap.set(pid, {
-        name,
-        category_id: Number.isFinite(cid) ? cid : null,
-        basePrice,
-      });
-    }
-
-    const groups = Array.isArray(p.group_modifications) ? p.group_modifications : [];
-    for (const g of groups) {
-      const mods = Array.isArray(g.modifications) ? g.modifications : [];
-      for (const m of mods) {
-        const modId = Number(m.dish_modification_id ?? m.modification_id ?? m.id);
-        const modName = String(m.name ?? "");
-        const modPriceUAH = Number(m.price ?? 0) || 0;
-
-        if (Number.isFinite(modId)) {
-          modMap.set(modId, {
-            name: modName,
-            price: modPriceUAH,
-          });
-        }
-      }
+      map.set(pid, { name, category_id: Number.isFinite(cid) ? cid : null });
     }
   }
 
-  PRODUCT_INFO = productMap;
-  MOD_INFO = modMap;
+  PRODUCT_INFO = map;
   PRODUCTS_CACHE_AT = now;
 }
 
@@ -158,6 +132,8 @@ app.get("/api/waiters-sales", async (req, res) => {
 
 // -------------------- ПРОДАЖИ ПО ТОВАРАМ (для кофе) --------------------
 async function fetchProductsSales({ dateFrom, dateTo }) {
+  // На разных аккаунтах Poster может отличаться метод/структура.
+  // Пробуем несколько вариантов.
   const methods = [
     { m: "dash.getProductsSales", p: { dateFrom, dateTo } },
     { m: "dash.getProductsSales", p: {} },
@@ -204,13 +180,12 @@ app.get("/api/bar-sales", async (req, res) => {
 
     const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
 
-    // Категории бара
+    // 1) Категории 9/14/34: количество (название берем из menu.getCategories)
     const BAR_CATS = [9, 14, 34];
     const want = new Set(BAR_CATS);
 
     await ensureCategories();
 
-    // 1) Categories qty + name
     let categories = BAR_CATS.map((cid) => ({
       category_id: cid,
       name: CAT_NAME.get(cid) || `Категорія ${cid}`,
@@ -226,6 +201,7 @@ app.get("/api/bar-sales", async (req, res) => {
         const cid = Number(x.category_id);
         if (!want.has(cid)) continue;
 
+        // иногда в ответе есть category_name, иногда нет
         const nameFromDash = String(x.category_name ?? x.name ?? "");
         const name = CAT_NAME.get(cid) || nameFromDash || `Категорія ${cid}`;
 
@@ -242,11 +218,10 @@ app.get("/api/bar-sales", async (req, res) => {
         qty: 0,
       });
     } catch {
-      // keep defaults
+      // оставляем нули
     }
 
-    // 2) Coffee shots mapping (кат.34 + кат.47)
-    // ✅ 530=1, 531=2, 423=2
+    // 2) Кофе: закладки по продуктам (кат.34 + кат.47), 530 = 2
     const shotsPerProduct = new Map([
       // cat 34
       [230, 1],
@@ -258,18 +233,9 @@ app.get("/api/bar-sales", async (req, res) => {
       [183, 1],
       [182, 1],
       [317, 1],
-
-      // ✅ кава в зал
-      [425, 1],
-      [424, 1],
-      [441, 1],
-      [422, 1],
-      [423, 2],
-
-      // cat 47 (штат)
+      // cat 47
       [529, 1],
-      [530, 1], // 🔁
-      [531, 2], // ✅
+      [530, 2], // ✅
       [533, 1],
       [534, 1],
       [535, 1],
@@ -323,203 +289,6 @@ app.get("/api/bar-sales", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Server error", detail: String(e) });
-  }
-});
-
-// -------------------- SAUCES & EXTRAS (допи + модифікатори) --------------------
-const SAUCE_CATEGORY_IDS = new Set([37, 41]);
-
-app.get("/api/sauces-sales", async (req, res) => {
-  try {
-    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
-
-    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
-
-    await ensureProducts();
-
-    // product_id які належать категоріям допів (37, 41)
-    // basePrice в цих продуктів — в копійках (як і product_price в чеку)
-    const sauceProductIds = new Set();
-    for (const [pid, info] of PRODUCT_INFO.entries()) {
-      if (SAUCE_CATEGORY_IDS.has(info.category_id)) sauceProductIds.add(pid);
-    }
-
-    // Всі закриті чеки з товарами за період (пагінація)
-    let allTransactions = [];
-    let nextTr = null;
-    let safetyLimit = 20;
-
-    while (safetyLimit-- > 0) {
-      const params = { dateFrom, dateTo, status: 2, include_products: true };
-      if (nextTr) params.next_tr = nextTr;
-      const j = await poster("dash.getTransactions", params);
-      const batch = Array.isArray(j?.response) ? j.response : [];
-      if (!batch.length) break;
-      allTransactions = allTransactions.concat(batch);
-      if (batch.length < 100) break;
-      nextTr = batch[batch.length - 1].transaction_id;
-    }
-
-    const byWaiter = new Map();
-    let statProducts = 0, statMods = 0;
-
-    function ensureWaiter(uid, name) {
-      if (!byWaiter.has(uid)) {
-        byWaiter.set(uid, {
-          user_id: uid,
-          name,
-          productRevenueKopecs: 0, // від товарів-допів кат. 37/41
-          productQty: 0,
-          modRevenueKopecs: 0,     // від платних модифікаторів (ціна з MOD_INFO × qty)
-          modQty: 0,
-        });
-      }
-      return byWaiter.get(uid);
-    }
-
-    for (const tr of allTransactions) {
-      const uid = String(tr.user_id ?? "");
-      const waiterName = tr.name || "—";
-      const products = Array.isArray(tr.products) ? tr.products : [];
-
-      for (const p of products) {
-        const pid = Number(p.product_id);
-        const modId = Number(p.modification_id || 0);
-        const qty = Math.round(Number(p.num ?? 1) || 1);
-        const linePriceKopecs = Number(p.product_price ?? 0) || 0;
-        const w = ensureWaiter(uid, waiterName);
-
-        // 1) Окремий товар-доп з категорії 37/41
-        //    product_price = фінальна сума рядка в копійках (вже × qty)
-        if (sauceProductIds.has(pid)) {
-          w.productRevenueKopecs += linePriceKopecs;
-          w.productQty += qty;
-          statProducts++;
-          continue; // не рахуємо модифікатор двічі
-        }
-
-        // 2) Платний модифікатор на звичайному товарі (чебурек + Мікс Сирів тощо)
-        //    Poster НЕ збільшує product_price при додаванні мода —
-        //    тому беремо ціну мода напряму з MOD_INFO (в гривнях) і переводимо в копійки
-        if (modId !== 0) {
-          const modInfo = MOD_INFO.get(modId);
-          const modPriceUAH = modInfo ? modInfo.price : 0;
-          // Ігноруємо безкоштовні (0.01₴) і нульові моди — це соуси/добавки без ціни
-          if (modPriceUAH >= 1) {
-            const modRevenueKopecs = Math.round(modPriceUAH * 100) * qty;
-            w.modRevenueKopecs += modRevenueKopecs;
-            w.modQty += qty;
-            statMods++;
-          }
-        }
-      }
-    }
-
-    const result = [...byWaiter.values()]
-      .map((w) => ({
-        user_id: w.user_id,
-        name: w.name,
-        revenue: Math.round((w.productRevenueKopecs + w.modRevenueKopecs) / 100),
-        qty: w.productQty + w.modQty,
-        productRevenue: Math.round(w.productRevenueKopecs / 100),
-        modRevenue: Math.round(w.modRevenueKopecs / 100),
-      }))
-      .filter((w) => w.revenue > 0 || w.qty > 0)
-      .sort((a, b) => b.revenue - a.revenue);
-
-    const totalRevenue = result.reduce((s, w) => s + w.revenue, 0);
-    const totalQty = result.reduce((s, w) => s + w.qty, 0);
-
-    res.json({
-      dateFrom,
-      dateTo,
-      by_waiter: result,
-      total: { revenue: totalRevenue, qty: totalQty },
-      debug: {
-        sauceCategoryIds: [...SAUCE_CATEGORY_IDS],
-        sauceProductCount: sauceProductIds.size,
-        transactionsCount: allTransactions.length,
-        matchedProductLines: statProducts,
-        matchedModifierLines: statMods,
-      },
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Server error", detail: String(e) });
-  }
-});
-
-// -------------------- DEBUG: які продукти в sauceProductIds --------------------
-app.get("/api/debug-sauce-products", async (req, res) => {
-  try {
-    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
-    await ensureProducts();
-
-    const sauceProductIds = new Set();
-    const sauceProducts = [];
-    for (const [pid, info] of PRODUCT_INFO.entries()) {
-      if (SAUCE_CATEGORY_IDS.has(info.category_id)) {
-        sauceProductIds.add(pid);
-        sauceProducts.push({ pid, name: info.name, category_id: info.category_id, basePrice: info.basePrice });
-      }
-    }
-    sauceProducts.sort((a, b) => a.category_id - b.category_id || a.pid - b.pid);
-
-    // Перевіримо конкретні product_id з чеку Сергія: 528, 53, 144
-    const checkIds = [528, 53, 144];
-    const checkInfo = checkIds.map(id => ({
-      product_id: id,
-      info: PRODUCT_INFO.get(id) || null,
-      inSauceSet: sauceProductIds.has(id),
-    }));
-
-    res.json({
-      sauceProductCount: sauceProductIds.size,
-      sauceProducts,
-      checkSpecific: checkInfo,
-    });
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
-
-// -------------------- DEBUG: платні модифікатори з меню --------------------
-app.get("/api/debug-mods-menu", async (req, res) => {
-  try {
-    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
-    await ensureProducts();
-    const paid = [];
-    for (const [modId, info] of MOD_INFO.entries()) {
-      if (info.price > 0) paid.push({ modId, name: info.name, price: info.price });
-    }
-    paid.sort((a, b) => b.price - a.price);
-    res.json({ total: paid.length, paid_modifiers: paid });
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
-
-// -------------------- DEBUG: чеки з модифікаторами --------------------
-app.get("/api/debug-mods", async (req, res) => {
-  try {
-    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
-    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
-    const j = await poster("dash.getTransactions", { dateFrom, dateTo, status: 2, include_products: true });
-    const batch = Array.isArray(j?.response) ? j.response : [];
-    const withMods = batch.find(tr => Array.isArray(tr.products) && tr.products.some(p => p.modification_id && Number(p.modification_id) !== 0));
-    const fallback = batch.find(tr => Array.isArray(tr.products) && tr.products.length > 0);
-    const target = withMods || fallback;
-    if (!target) return res.json({ message: "Немає закритих чеків за цей день", total: batch.length });
-    res.json({
-      found_with_mod: !!withMods,
-      transaction_id: target.transaction_id,
-      waiter: target.name,
-      product_keys: target.products?.[0] ? Object.keys(target.products[0]) : [],
-      products: target.products,
-      all_mod_ids_in_batch: [...new Set(batch.flatMap(tr => (tr.products || []).map(p => p.modification_id).filter(id => id && Number(id) !== 0)))].slice(0, 50),
-    });
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
   }
 });
 
