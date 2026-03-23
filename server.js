@@ -402,8 +402,8 @@ app.get("/api/sauces-sales", async (req, res) => {
         //    Це точна сума всіх допів на рядку, незалежно від кількості модів
         if (modId !== 0) {
           const info = PRODUCT_INFO.get(pid);
-          // basePrice з Poster вже в копійках (як і product_price в чеку)
-          const basePriceKopecs = info ? Math.round(info.basePrice) : 0;
+          // basePrice з Poster приходить в гривнях, product_price в чеку — в копійках
+          const basePriceKopecs = info ? Math.round(info.basePrice * 100) : 0;
           const diffKopecs = linePriceKopecs - basePriceKopecs * qty;
           if (diffKopecs > 0) {
             w.modRevenueKopecs += diffKopecs;
