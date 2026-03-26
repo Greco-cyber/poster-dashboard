@@ -486,7 +486,7 @@ export default function App() {
             </div>
 
             {/* RIGHT: Employees */}
-            <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-4 overflow-y-auto h-full">
+            <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-4 overflow-y-auto h-full content-start">
               {daySales
                 .sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))
                 .map((w) => {
