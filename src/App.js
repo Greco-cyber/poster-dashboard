@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Clock, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 const API_BASE = process.env.REACT_APP_API_BASE || "";
 
@@ -17,7 +17,7 @@ function lastDayOfMonthStr(s) {
   const p = (n) => String(n).padStart(2,"0");
   return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}`;
 }
-const money = (n) => Number(n).toLocaleString("uk-UA", { minimumFractionDigits:0, maximumFractionDigits:0 });
+const fmt = (n) => Number(n).toLocaleString("uk-UA", { minimumFractionDigits:0, maximumFractionDigits:0 });
 
 export default function App() {
   const today = useMemo(() => yyyymmdd(), []);
@@ -29,6 +29,7 @@ export default function App() {
   const [barData, setBarData] = useState(null);
   const [upsellLoading, setUpsellLoading] = useState(false);
   const [upsellData, setUpsellData] = useState([]);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const shotsOverride = useMemo(() => new Map([
     [230,1],[485,1],[307,2],[231,1],[316,1],[406,1],[183,1],[182,1],[317,1],
@@ -59,6 +60,7 @@ export default function App() {
         avgMap[w.user_id] = ch > 0 ? rev/ch : 0;
       }
       setDaySales(dayList); setAvgPerMonthMap(avgMap);
+      setLastUpdated(new Date());
     } catch(e) { setError("Помилка завантаження"); setDaySales([]); }
     finally { setLoading(false); }
 
@@ -99,7 +101,7 @@ export default function App() {
     const arr = Array.isArray(barData?.categories) ? barData.categories : [];
     const map = new Map(arr.map((x) => [Number(x.category_id), x]));
     const pick = (id, name) => ({ id, name, qty: Number(map.get(id)?.qty||0) });
-    return [pick(9,"Пиво"), pick(14,"Холодні напої"), pick(34,"Коктейлі")];
+    return [pick(9,"Пиво"), pick(14,"Холодні"), pick(34,"Коктейлі")];
   }, [barData]);
 
   const coffeeSplit = useMemo(() => {
@@ -110,172 +112,305 @@ export default function App() {
     return { hall:sum(s34), staff:sum(s47), total:{qty:barData?.coffee?.total_qty||0, zak:barData?.coffee?.total_zakladki||0} };
   }, [barData]);
 
-  const showMain = !loading && daySales.length > 0;
+  // FIX: правильный расчёт Разом для upsell
+  const upsellTotals = useMemo(() => ({
+    day: upsellData.reduce((s,r) => s + Number(r.day_sum||0), 0),
+    month: upsellData.reduce((s,r) => s + Number(r.month_sum||0), 0),
+  }), [upsellData]);
+
   const isLoading = loading || upsellLoading;
+  const showMain = !loading && daySales.length > 0;
+
+  const timeStr = lastUpdated
+    ? lastUpdated.toLocaleTimeString("uk-UA", { hour:"2-digit", minute:"2-digit" })
+    : "--:--";
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col">
+    <div style={{
+      width: "100vw",
+      height: "100vh",
+      overflow: "hidden",
+      background: "linear-gradient(135deg, #0a0e1a 0%, #0d1529 50%, #0a1020 100%)",
+      fontFamily: "'Segoe UI', system-ui, sans-serif",
+      display: "flex",
+      flexDirection: "column",
+      padding: "6px",
+      gap: "5px",
+      boxSizing: "border-box",
+      color: "#fff",
+    }}>
 
-      {/* HEADER */}
-      <div className="bg-gray-800 border-b border-gray-700 px-3 py-2 flex items-center justify-between shrink-0">
-        <div>
-          <p className="text-sm font-bold text-white">GRECO · Зміна</p>
-          <p className="text-gray-400 text-xs">{dateInputValue(date)}</p>
+      {/* ═══ HEADER ═══ */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        background: "rgba(255,255,255,0.05)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        borderRadius: "10px",
+        padding: "5px 10px",
+        flexShrink: 0,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div style={{
+            width: 6, height: 6, borderRadius: "50%",
+            background: isLoading ? "#f59e0b" : "#10b981",
+            boxShadow: `0 0 6px ${isLoading ? "#f59e0b" : "#10b981"}`,
+          }} />
+          <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: "0.05em", color: "#e2e8f0" }}>
+            GRECO · ЗМІНА
+          </span>
+          <span style={{ fontSize: 11, color: "#64748b" }}>{dateInputValue(date)}</span>
         </div>
-        <div className="flex items-center gap-2">
-          <Clock className="w-3.5 h-3.5 text-blue-400" />
+
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span style={{ fontSize: 10, color: "#475569" }}>оновлено {timeStr}</span>
           <input
             type="date"
-            className="px-2 py-1 border border-gray-600 rounded text-xs text-white bg-gray-700 focus:outline-none"
+            style={{
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 6, color: "#cbd5e1", fontSize: 11, padding: "3px 6px",
+              outline: "none",
+            }}
             value={dateInputValue(date)}
             onChange={(e) => setDate(e.target.value.replaceAll("-",""))}
           />
-          <button onClick={loadAll} disabled={isLoading}
-            className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
-            <RefreshCw className={`w-3 h-3 ${isLoading?"animate-spin":""}`} />
+          <button onClick={loadAll} disabled={isLoading} style={{
+            display: "flex", alignItems: "center", gap: 4,
+            padding: "4px 10px", borderRadius: 6, border: "none",
+            background: isLoading ? "rgba(59,130,246,0.3)" : "rgba(59,130,246,0.8)",
+            color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
+          }}>
+            <RefreshCw size={11} style={{ animation: isLoading ? "spin 1s linear infinite" : "none" }} />
             {isLoading ? "..." : "Оновити"}
           </button>
         </div>
       </div>
 
-      {error && <div className="bg-red-900 px-3 py-1.5 shrink-0"><p className="text-red-200 text-xs">{error}</p></div>}
+      {error && (
+        <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "4px 10px", flexShrink: 0 }}>
+          <span style={{ color: "#fca5a5", fontSize: 11 }}>{error}</span>
+        </div>
+      )}
 
       {showMain && (
-        <div className="flex-1 flex flex-col gap-2 p-2">
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "5px", minHeight: 0 }}>
 
-          {/* ТОТАЛИ */}
-          <div className="grid grid-cols-3 gap-2 shrink-0">
+          {/* ═══ ROW 1: ТОТАЛИ ═══ */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5, flexShrink: 0 }}>
             {[
-              { label:"Виручка", val:`${money(totals.rev)} ₴`, color:"text-green-400" },
-              { label:"Чеки", val:totals.ch, color:"text-blue-400" },
-              { label:"Серед. чек", val:`${money(totals.avg)} ₴`, color:"text-purple-400" },
+              { label: "ВИРУЧКА", val: `${fmt(totals.rev)} ₴`, color: "#34d399", glow: "#34d399" },
+              { label: "ЧЕКИ", val: totals.ch, color: "#60a5fa", glow: "#60a5fa" },
+              { label: "СЕРЕД. ЧЕК", val: `${fmt(totals.avg)} ₴`, color: "#c084fc", glow: "#c084fc" },
             ].map((t) => (
-              <div key={t.label} className="bg-gray-800 rounded-xl border border-gray-700 px-3 py-2 text-center">
-                <p className="text-gray-400 text-xs mb-0.5">{t.label}</p>
-                <p className={`text-lg font-bold ${t.color}`}>{t.val}</p>
+              <div key={t.label} style={{
+                background: "rgba(255,255,255,0.04)",
+                border: `1px solid rgba(255,255,255,0.08)`,
+                borderRadius: 10,
+                padding: "8px 12px",
+                textAlign: "center",
+              }}>
+                <div style={{ fontSize: 9, color: "#64748b", letterSpacing: "0.1em", fontWeight: 600, marginBottom: 2 }}>{t.label}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: t.color, textShadow: `0 0 12px ${t.glow}40` }}>{t.val}</div>
               </div>
             ))}
           </div>
 
-          {/* СПІВРОБІТНИКИ */}
-          <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
-            <div className="px-3 py-2 border-b border-gray-700">
-              <h2 className="text-sm font-bold text-white">👥 Співробітники</h2>
-            </div>
-            <div className="divide-y divide-gray-700/50">
+          {/* ═══ ROW 2: СПІВРОБІТНИКИ + БАР ═══ */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, flexShrink: 0 }}>
+
+            {/* Співробітники */}
+            <div style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 10,
+              overflow: "hidden",
+            }}>
+              <div style={{ padding: "5px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 12 }}>👥</span>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "#94a3b8" }}>СПІВРОБІТНИКИ</span>
+              </div>
+              {/* Заголовок колонок */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 68px 42px 70px 64px", gap: 0, padding: "3px 8px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                {["ІМ'Я", "ВИРУЧКА", "ЧЕК", "СЕРЕД", "МІС"].map((h) => (
+                  <div key={h} style={{ fontSize: 8, color: "#475569", fontWeight: 700, letterSpacing: "0.08em", textAlign: h === "ІМ'Я" ? "left" : "right" }}>{h}</div>
+                ))}
+              </div>
               {daySales
                 .sort((a,b) => Number(b.revenue||0)-Number(a.revenue||0))
-                .map((w) => {
+                .map((w, i) => {
                   const rev = Number(w.revenue||0)/100;
                   const ch = Number(w.clients||0);
                   const avgDay = ch>0?rev/ch:0;
                   const avgMon = avgPerMonthMap[w.user_id];
                   const isBar = w.name?.toLowerCase().includes("бар");
                   return (
-                    <div key={w.user_id} className="px-3 py-2.5 flex items-center gap-3">
-                      <div className="w-24 shrink-0">
-                        <p className="text-sm font-semibold text-white truncate">{w.name||"—"}</p>
-                        <p className="text-xs text-gray-400">{isBar?"Бармен":"Офіціант"}</p>
+                    <div key={w.user_id} style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 68px 42px 70px 64px",
+                      padding: "5px 8px",
+                      borderBottom: "1px solid rgba(255,255,255,0.04)",
+                      background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
+                      alignItems: "center",
+                    }}>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.name||"—"}</div>
+                        <div style={{ fontSize: 9, color: isBar ? "#f59e0b" : "#60a5fa", fontWeight: 600 }}>{isBar?"Бармен":"Офіціант"}</div>
                       </div>
-                      <div className="flex-1 grid grid-cols-4 gap-1 text-center">
-                        <div>
-                          <p className="text-gray-400 text-xs">Виручка</p>
-                          <p className="text-sm font-bold text-white">{money(rev)}₴</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-400 text-xs">Чеки</p>
-                          <p className="text-sm font-bold text-white">{ch}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-400 text-xs">Серед</p>
-                          <p className="text-sm font-bold text-white">{money(avgDay)}₴</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-400 text-xs">Міс</p>
-                          <p className="text-sm font-semibold text-gray-300">{avgMon!=null?`${money(avgMon)}₴`:"—"}</p>
-                        </div>
-                      </div>
+                      <div style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: "#34d399" }}>{fmt(rev)}₴</div>
+                      <div style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: "#60a5fa" }}>{ch}</div>
+                      <div style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>{fmt(avgDay)}₴</div>
+                      <div style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: "#64748b" }}>{avgMon!=null?`${fmt(avgMon)}₴`:"—"}</div>
                     </div>
                   );
                 })}
             </div>
-          </div>
 
-          {/* БАР */}
-          <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
-            <div className="px-3 py-2 border-b border-gray-700">
-              <h2 className="text-sm font-bold text-white">🍺 Бар</h2>
-            </div>
-            <div className="p-2 grid grid-cols-2 gap-2">
-              {/* Категорії */}
-              <div className="space-y-1.5">
-                {barCats.map((c,idx) => (
-                  <div key={c.id} className="bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${idx===0?"bg-amber-400":idx===1?"bg-blue-400":"bg-orange-400"}`} />
-                      <span className="text-xs text-white">{c.name}</span>
-                    </div>
-                    <span className="text-sm font-bold text-white ml-2">{c.qty} <span className="text-xs text-gray-400">шт</span></span>
-                  </div>
-                ))}
+            {/* Бар */}
+            <div style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 10,
+              overflow: "hidden",
+            }}>
+              <div style={{ padding: "5px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 12 }}>🍺</span>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "#94a3b8" }}>БАР</span>
               </div>
-              {/* Кава */}
-              <div className="space-y-1.5">
-                {[
-                  { label:"Зал", sub:"Кава в залі", qty:coffeeSplit.hall.qty, zak:coffeeSplit.hall.zak, cls:"border-orange-700/40 bg-orange-900/20", txt:"text-orange-300" },
-                  { label:"Штат", sub:"Кава персонал", qty:coffeeSplit.staff.qty, zak:coffeeSplit.staff.zak, cls:"border-amber-700/40 bg-amber-900/20", txt:"text-amber-300" },
-                  { label:"Всього", sub:`↳ ${coffeeSplit.total.zak} закл`, qty:coffeeSplit.total.qty, zak:null, cls:"border-orange-600/60 bg-gray-900/60 border-2", txt:"text-orange-400" },
-                ].map((r) => (
-                  <div key={r.label} className={`border rounded-lg px-3 py-2 flex items-center justify-between ${r.cls}`}>
-                    <div>
-                      <p className={`text-xs font-semibold ${r.txt}`}>{r.label}</p>
-                      <p className="text-xs text-gray-400">{r.sub}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`text-sm font-bold ${r.txt}`}>{r.qty} шт</p>
-                      {r.zak !== null && <p className="text-xs text-gray-400">↳ {r.zak} зак</p>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
 
-          {/* ВИТОРГ СОУСИ/ДОПИ */}
-          <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
-            <div className="px-3 py-2 border-b border-gray-700 flex items-center justify-between">
-              <h2 className="text-sm font-bold text-white">🔥 Виторг соуси/допи</h2>
-              {upsellLoading && <span className="text-xs text-gray-500 animate-pulse">завантаження...</span>}
-            </div>
-            <div className="p-2">
-              {upsellData.length === 0 && !upsellLoading ? (
-                <p className="text-gray-500 text-xs text-center py-2">Немає даних</p>
-              ) : (
-                <table className="w-full">
-                  <thead>
-                    <tr className="text-gray-400 text-xs uppercase">
-                      <th className="text-left pb-1.5 font-medium">Ім'я</th>
-                      <th className="text-right pb-1.5 font-medium">Сьогодні</th>
-                      <th className="text-right pb-1.5 font-medium">Місяць</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-700/50">
-                    {upsellData.map((row) => (
-                      <tr key={row.user_id}>
-                        <td className="py-1.5 text-sm font-medium text-white">{row.name||"—"}</td>
-                        <td className="py-1.5 text-right text-sm font-bold text-green-400">{money(row.day_sum)} ₴</td>
-                        <td className="py-1.5 text-right text-sm font-semibold text-gray-300">{money(row.month_sum)} ₴</td>
-                      </tr>
+              <div style={{ padding: "6px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+                {/* Категорії */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
+                  {barCats.map((c, idx) => {
+                    const colors = ["#f59e0b", "#60a5fa", "#f97316"];
+                    return (
+                      <div key={c.id} style={{
+                        background: "rgba(255,255,255,0.05)",
+                        border: `1px solid ${colors[idx]}30`,
+                        borderRadius: 8,
+                        padding: "5px 6px",
+                        textAlign: "center",
+                      }}>
+                        <div style={{ fontSize: 9, color: "#64748b", marginBottom: 2 }}>{c.name}</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: colors[idx] }}>{c.qty}</div>
+                        <div style={{ fontSize: 9, color: "#475569" }}>шт</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Кава */}
+                <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 4 }}>
+                  <div style={{ fontSize: 9, color: "#64748b", fontWeight: 700, letterSpacing: "0.1em", marginBottom: 4 }}>☕ КАВА</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3 }}>
+                    {[
+                      { label: "Зал", qty: coffeeSplit.hall.qty, zak: coffeeSplit.hall.zak, color: "#fb923c" },
+                      { label: "Штат", qty: coffeeSplit.staff.qty, zak: coffeeSplit.staff.zak, color: "#fbbf24" },
+                    ].map((r) => (
+                      <div key={r.label} style={{
+                        background: `${r.color}10`,
+                        border: `1px solid ${r.color}25`,
+                        borderRadius: 7,
+                        padding: "4px 7px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: r.color }}>{r.label}</div>
+                          <div style={{ fontSize: 9, color: "#475569" }}>↳ {r.zak} закл</div>
+                        </div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: r.color }}>{r.qty}</div>
+                      </div>
                     ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-gray-600">
-                      <td className="pt-1.5 text-xs text-gray-400 font-bold uppercase">Разом</td>
-                      <td className="pt-1.5 text-right text-sm font-bold text-green-400">{money(upsellData.reduce((s,r)=>s+r.day_sum,0))} ₴</td>
-                      <td className="pt-1.5 text-right text-sm font-bold text-gray-300">{money(upsellData.reduce((s,r)=>s+r.month_sum,0))} ₴</td>
-                    </tr>
-                  </tfoot>
-                </table>
+                  </div>
+                  {/* Всього */}
+                  <div style={{
+                    marginTop: 3,
+                    background: "rgba(251,146,60,0.12)",
+                    border: "1px solid rgba(251,146,60,0.35)",
+                    borderRadius: 7,
+                    padding: "4px 7px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}>
+                    <div>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "#fb923c" }}>ВСЬОГО</span>
+                      <span style={{ fontSize: 9, color: "#64748b", marginLeft: 6 }}>↳ {coffeeSplit.total.zak} закл</span>
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#fb923c" }}>{coffeeSplit.total.qty} шт</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ═══ ROW 3: UPSELL ═══ */}
+          <div style={{
+            flex: 1,
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 10,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+          }}>
+            <div style={{ padding: "5px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 12 }}>🔥</span>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "#94a3b8" }}>ВИТОРГ СОУСИ / ДОПИ</span>
+              </div>
+              {upsellLoading && <span style={{ fontSize: 9, color: "#f59e0b", animation: "pulse 1s infinite" }}>завантаження...</span>}
+            </div>
+
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              {/* Заголовок таблиці */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 130px 130px", padding: "3px 10px", borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
+                {["ІМ'Я", "СЬОГОДНІ", "МІСЯЦЬ"].map((h, i) => (
+                  <div key={h} style={{ fontSize: 9, color: "#475569", fontWeight: 700, letterSpacing: "0.08em", textAlign: i === 0 ? "left" : "right" }}>{h}</div>
+                ))}
+              </div>
+
+              {/* Рядки */}
+              {upsellData.length === 0 && !upsellLoading ? (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontSize: 12, color: "#475569" }}>Немає даних</span>
+                </div>
+              ) : (
+                upsellData.map((row, i) => (
+                  <div key={row.user_id} style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 130px 130px",
+                    padding: "5px 10px",
+                    borderBottom: "1px solid rgba(255,255,255,0.04)",
+                    background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
+                    alignItems: "center",
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{row.name||"—"}</div>
+                    <div style={{ textAlign: "right", fontSize: 14, fontWeight: 800, color: "#34d399" }}>{fmt(row.day_sum)} ₴</div>
+                    <div style={{ textAlign: "right", fontSize: 13, fontWeight: 600, color: "#94a3b8" }}>{fmt(row.month_sum)} ₴</div>
+                  </div>
+                ))
+              )}
+
+              {/* РАЗОМ — FIX: тепер правильно рахує */}
+              {upsellData.length > 0 && (
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 130px 130px",
+                  padding: "5px 10px",
+                  borderTop: "2px solid rgba(255,255,255,0.1)",
+                  background: "rgba(255,255,255,0.04)",
+                  alignItems: "center",
+                  flexShrink: 0,
+                  marginTop: "auto",
+                }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.08em" }}>РАЗОМ</div>
+                  <div style={{ textAlign: "right", fontSize: 15, fontWeight: 800, color: "#34d399", textShadow: "0 0 10px #34d39950" }}>{fmt(upsellTotals.day)} ₴</div>
+                  <div style={{ textAlign: "right", fontSize: 14, fontWeight: 700, color: "#94a3b8" }}>{fmt(upsellTotals.month)} ₴</div>
+                </div>
               )}
             </div>
           </div>
@@ -284,14 +419,22 @@ export default function App() {
       )}
 
       {!loading && daySales.length===0 && !error && (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-gray-500 text-sm">Немає даних за цей день</p>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <p style={{ color: "#475569", fontSize: 13 }}>Немає даних за цей день</p>
         </div>
       )}
 
-      <div className="text-center py-1">
-        <p className="text-gray-600 text-xs">GRECO Tech™</p>
+      {/* Footer */}
+      <div style={{ textAlign: "center", flexShrink: 0 }}>
+        <span style={{ fontSize: 9, color: "#1e293b", letterSpacing: "0.1em" }}>GRECO TECH™</span>
       </div>
+
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        * { box-sizing: border-box; }
+        input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); }
+      `}</style>
     </div>
   );
 }
