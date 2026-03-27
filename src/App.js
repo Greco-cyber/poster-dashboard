@@ -51,6 +51,11 @@ export default function App() {
   const [barError, setBarError] = useState("");
   const [barData, setBarData] = useState(null);
 
+  // UPSELL
+  const [upsellLoading, setUpsellLoading] = useState(false);
+  const [upsellError, setUpsellError] = useState("");
+  const [upsellData, setUpsellData] = useState([]);
+
   // ✅ ОБНОВЛЕНО: 530=1, 531=2, + кава в зал, 423=2
   const shotsOverride = useMemo(
     () =>
@@ -101,6 +106,10 @@ export default function App() {
     // Bar
     setBarLoading(true);
     setBarError("");
+
+    // Upsell
+    setUpsellLoading(true);
+    setUpsellError("");
 
     try {
       const mFrom = firstDayOfMonthStr(date);
@@ -181,6 +190,19 @@ export default function App() {
       setBarData(null);
     } finally {
       setBarLoading(false);
+    }
+    // UPSELL load
+    try {
+      const dUpsell = await fetchJsonOrThrow(
+        `${API_BASE}/api/upsell-sales?dateFrom=${date}&dateTo=${date}`
+      );
+      setUpsellData(Array.isArray(dUpsell?.response) ? dUpsell.response : []);
+    } catch (e) {
+      console.error(e);
+      setUpsellError("Не вдалося завантажити дані по допах.");
+      setUpsellData([]);
+    } finally {
+      setUpsellLoading(false);
     }
   }, [date, fetchJsonOrThrow, shotsOverride]);
 
@@ -486,7 +508,7 @@ export default function App() {
             </div>
 
             {/* RIGHT: Employees */}
-            <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-4 overflow-y-auto h-full content-start">
+            <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-4 overflow-y-auto h-full">
               {daySales
                 .sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))
                 .map((w) => {
@@ -535,6 +557,78 @@ export default function App() {
                     </div>
                   );
                 })}
+            </div>
+          </div>
+        )}
+
+
+        {/* UPSELL BLOCK */}
+        {showMain && (
+          <div className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-700">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-bold text-white text-lg">🔥 Допи / Соуси / Моди</h2>
+                  <p className="text-gray-400 text-xs mt-0.5">Продажі допів за {dateInputValue(date)}</p>
+                </div>
+                {upsellLoading && (
+                  <span className="text-xs text-gray-500 animate-pulse">Завантаження...</span>
+                )}
+              </div>
+            </div>
+
+            {upsellError && (
+              <div className="px-4 py-2 bg-yellow-900/30 border-b border-yellow-700/30">
+                <p className="text-yellow-300 text-xs">{upsellError}</p>
+              </div>
+            )}
+
+            <div className="p-4">
+              {upsellData.length === 0 && !upsellLoading ? (
+                <p className="text-gray-500 text-sm text-center py-4">Немає даних по допах</p>
+              ) : (
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-gray-400 text-xs uppercase tracking-wider">
+                      <th className="text-left pb-3 font-medium">Співробітник</th>
+                      <th className="text-right pb-3 font-medium">Сьогодні</th>
+                      <th className="text-right pb-3 font-medium">За місяць</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-700/50">
+                    {upsellData.map((row) => (
+                      <tr key={row.user_id} className="hover:bg-gray-700/20 transition-colors">
+                        <td className="py-2.5 text-sm font-medium text-white">{row.name || "—"}</td>
+                        <td className="py-2.5 text-right">
+                          <span className="text-sm font-bold text-green-400">
+                            {money(row.day_sum)} ₴
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <span className="text-sm font-semibold text-gray-300">
+                            {money(row.month_sum)} ₴
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-600">
+                      <td className="pt-3 text-xs text-gray-400 font-semibold uppercase">Разом</td>
+                      <td className="pt-3 text-right">
+                        <span className="text-base font-bold text-green-400">
+                          {money(upsellData.reduce((s, r) => s + r.day_sum, 0))} ₴
+                        </span>
+                      </td>
+                      <td className="pt-3 text-right">
+                        <span className="text-base font-bold text-gray-300">
+                          {money(upsellData.reduce((s, r) => s + r.month_sum, 0))} ₴
+                        </span>
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
             </div>
           </div>
         )}
