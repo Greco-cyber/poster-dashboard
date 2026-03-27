@@ -291,5 +291,180 @@ app.get("/api/bar-sales", async (req, res) => {
   }
 });
 
+// -------------------- КЭШ: базові ціни товарів --------------------
+// product_id -> base_price (грн, вже не копійки)
+let PRODUCT_BASE_PRICE = new Map();
+let PRODUCT_BASE_CACHE_AT = 0;
+const PRODUCT_BASE_TTL_MS = 30 * 60 * 1000;
+const SPOT_ID = 1; // наш spot
+
+async function ensureProductBasePrices() {
+  const now = Date.now();
+  if (PRODUCT_BASE_PRICE.size && now - PRODUCT_BASE_CACHE_AT < PRODUCT_BASE_TTL_MS) return;
+
+  try {
+    const j = await poster("menu.getProducts");
+    const arr = Array.isArray(j?.response) ? j.response : [];
+    const map = new Map();
+
+    for (const p of arr) {
+      const pid = Number(p.product_id ?? p.id);
+      if (!Number.isFinite(pid)) continue;
+
+      let price = null;
+
+      // Шукаємо ціну для нашого spot_id в spots[]
+      if (Array.isArray(p.spots)) {
+        const spot = p.spots.find(s => Number(s.spot_id) === SPOT_ID);
+        if (spot) price = Number(spot.price) / 100; // копійки -> грн
+      }
+
+      // Якщо немає в spots — беремо з price object
+      if (price === null && p.price && typeof p.price === "object") {
+        const raw = p.price[String(SPOT_ID)] ?? p.price["1"];
+        if (raw != null) price = Number(raw) / 100;
+      }
+
+      if (price !== null && price > 0) {
+        map.set(pid, price);
+      }
+    }
+
+    if (map.size) {
+      PRODUCT_BASE_PRICE = map;
+      PRODUCT_BASE_CACHE_AT = now;
+    }
+  } catch (e) {
+    console.error("ensureProductBasePrices error:", e);
+  }
+}
+
+// -------------------- КЭШ: місячні upsell --------------------
+const UPSELL_MONTH_CACHE = new Map();
+const UPSELL_MONTH_TTL_MS = 30 * 60 * 1000;
+
+// -------------------- UPSELL: категорії --------------------
+const UPSELL_CATS = new Set([17, 37, 41]); // СОУСИ, ДОПИ, ДОПИ БАР
+
+// -------------------- UPSELL: розрахунок за період --------------------
+async function calcUpsellForPeriod(dateFrom, dateTo) {
+  const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
+  const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
+
+  await ensureProductBasePrices();
+
+  const userSums = new Map(); // user_id -> { name, sum }
+
+  const BATCH = 10;
+  for (let i = 0; i < transactions.length; i += BATCH) {
+    const batch = transactions.slice(i, i + BATCH);
+
+    await Promise.all(batch.map(async (tx) => {
+      const uid = String(tx.user_id);
+      const name = String(tx.name || "");
+      const txId = String(tx.transaction_id);
+
+      try {
+        const prodResp = await poster("dash.getTransactionProducts", {
+          transaction_id: txId,
+        });
+        const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
+
+        let txUpsell = 0;
+
+        for (const p of products) {
+          const catId = Number(p.category_id);
+          const modId = String(p.modification_id || "0");
+          const num = Number(p.num || 1);
+          const payedSum = Number(p.payed_sum || 0); // копійки
+          const pid = Number(p.product_id);
+
+          // А) Соус або доп — окрема позиція в чеку
+          if (UPSELL_CATS.has(catId)) {
+            txUpsell += payedSum / 100; // копійки -> грн
+          }
+          // Б) Модифікатор — тільки дельта ціни
+          else if (modId !== "0") {
+            const basePrice = PRODUCT_BASE_PRICE.get(pid); // грн за 1 шт
+            if (basePrice != null && basePrice > 0) {
+              const payedPerUnit = (payedSum / num) / 100; // грн за 1 шт
+              const delta = payedPerUnit - basePrice;
+              if (delta > 0) {
+                txUpsell += delta * num;
+              }
+            }
+          }
+        }
+
+        if (txUpsell > 0) {
+          if (!userSums.has(uid)) {
+            userSums.set(uid, { name, sum: 0 });
+          }
+          userSums.get(uid).sum += txUpsell;
+        }
+      } catch {
+        // пропускаємо проблемну транзакцію
+      }
+    }));
+  }
+
+  return userSums;
+}
+
+function lastDayOfMonthForUpsell(s) {
+  const y = +s.slice(0, 4), m = +s.slice(4, 6);
+  const d = new Date(y, m, 0);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+}
+
+// -------------------- UPSELL ENDPOINT --------------------
+app.get("/api/upsell-sales", async (req, res) => {
+  try {
+    if (!TOKEN)
+      return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
+
+    // --- День ---
+    const dayMap = await calcUpsellForPeriod(dateFrom, dateTo);
+
+    // --- Місяць ---
+    const monthKey = dateFrom.slice(0, 6);
+    const mFrom = `${monthKey}01`;
+    const mTo = lastDayOfMonthForUpsell(dateFrom);
+
+    let monthMap;
+    const cached = UPSELL_MONTH_CACHE.get(monthKey);
+    const now = Date.now();
+
+    if (cached && now - cached.computedAt < UPSELL_MONTH_TTL_MS) {
+      monthMap = cached.data;
+    } else {
+      monthMap = await calcUpsellForPeriod(mFrom, mTo);
+      UPSELL_MONTH_CACHE.set(monthKey, { computedAt: now, data: monthMap });
+    }
+
+    // --- Збираємо відповідь (тільки ті хто є в дні) ---
+    const result = [];
+    for (const [uid, dayData] of dayMap) {
+      const monthData = monthMap.get(uid);
+      result.push({
+        user_id: uid,
+        name: dayData.name,
+        day_sum: Math.round(dayData.sum * 100) / 100,
+        month_sum: monthData ? Math.round(monthData.sum * 100) / 100 : 0,
+      });
+    }
+
+    result.sort((a, b) => b.day_sum - a.day_sum);
+
+    res.json({ dateFrom, dateTo, response: result });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error", detail: String(e) });
+  }
+});
+
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`API server listening on ${port}`));
