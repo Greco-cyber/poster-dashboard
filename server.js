@@ -325,8 +325,9 @@ async function ensureProductBasePrices() {
         if (raw != null) price = Number(raw) / 100;
       }
 
+      const workshop = Number(p.workshop || 0);
       if (price !== null && price > 0) {
-        map.set(pid, price);
+        map.set(pid, { price, workshop });
       }
     }
 
@@ -371,8 +372,8 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
         const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
 
         let txSauces = 0;   // cat 17 — СОУСИ
-        let txKitchen = 0;  // cat 37 — ДОПИ кухня + модифікатори
-        let txBar = 0;      // cat 41 — ДОПИ БАР
+        let txKitchen = 0;  // cat 37 + модифікатори кухні
+        let txBar = 0;      // cat 41 + модифікатори бару
 
         for (const p of products) {
           const catId = Number(p.category_id);
@@ -382,19 +383,27 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
           const pid = Number(p.product_id);
 
           if (catId === 17) {
+            // СОУСИ — окрема позиція
             txSauces += payedSum / 100;
           } else if (catId === 37) {
+            // ДОПИ кухня — окрема позиція
             txKitchen += payedSum / 100;
           } else if (catId === 41) {
+            // ДОПИ бар — окрема позиція
             txBar += payedSum / 100;
           } else if (modId !== "0") {
-            // Модифікатор — дельта йде в ДОПИ кухня
-            const basePrice = PRODUCT_BASE_PRICE.get(pid);
-            if (basePrice != null && basePrice > 0) {
+            // Модифікатор — дельта, напрямок залежить від цеху товару
+            const info = PRODUCT_BASE_PRICE.get(pid);
+            if (info != null && info.price > 0) {
               const payedPerUnit = (payedSum / num) / 100;
-              const delta = payedPerUnit - basePrice;
+              const delta = payedPerUnit - info.price;
               if (delta > 0) {
-                txKitchen += delta * num;
+                // workshop=1 → БАР, решта → КУХНЯ
+                if (info.workshop === 1) {
+                  txBar += delta * num;
+                } else {
+                  txKitchen += delta * num;
+                }
               }
             }
           }
@@ -469,9 +478,6 @@ app.get("/api/upsell-sales", async (req, res) => {
         day_kitchen: r(dayData?.kitchen),
         day_bar: r(dayData?.bar),
         month_sum: r(monthData?.sum),
-        month_sauces: r(monthData?.sauces),
-        month_kitchen: r(monthData?.kitchen),
-        month_bar: r(monthData?.bar),
       });
     }
 
