@@ -370,7 +370,9 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
         });
         const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
 
-        let txUpsell = 0;
+        let txSauces = 0;   // cat 17 — СОУСИ
+        let txKitchen = 0;  // cat 37 — ДОПИ кухня + модифікатори
+        let txBar = 0;      // cat 41 — ДОПИ БАР
 
         for (const p of products) {
           const catId = Number(p.category_id);
@@ -379,28 +381,35 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
           const payedSum = Number(p.payed_sum || 0); // копійки
           const pid = Number(p.product_id);
 
-          // А) Соус або доп — окрема позиція в чеку
-          if (UPSELL_CATS.has(catId)) {
-            txUpsell += payedSum / 100; // копійки -> грн
-          }
-          // Б) Модифікатор — тільки дельта ціни
-          else if (modId !== "0") {
-            const basePrice = PRODUCT_BASE_PRICE.get(pid); // грн за 1 шт
+          if (catId === 17) {
+            txSauces += payedSum / 100;
+          } else if (catId === 37) {
+            txKitchen += payedSum / 100;
+          } else if (catId === 41) {
+            txBar += payedSum / 100;
+          } else if (modId !== "0") {
+            // Модифікатор — дельта йде в ДОПИ кухня
+            const basePrice = PRODUCT_BASE_PRICE.get(pid);
             if (basePrice != null && basePrice > 0) {
-              const payedPerUnit = (payedSum / num) / 100; // грн за 1 шт
+              const payedPerUnit = (payedSum / num) / 100;
               const delta = payedPerUnit - basePrice;
               if (delta > 0) {
-                txUpsell += delta * num;
+                txKitchen += delta * num;
               }
             }
           }
         }
 
-        if (txUpsell > 0) {
+        const txTotal = txSauces + txKitchen + txBar;
+        if (txTotal > 0) {
           if (!userSums.has(uid)) {
-            userSums.set(uid, { name, sum: 0 });
+            userSums.set(uid, { name, sauces: 0, kitchen: 0, bar: 0, sum: 0 });
           }
-          userSums.get(uid).sum += txUpsell;
+          const u = userSums.get(uid);
+          u.sauces += txSauces;
+          u.kitchen += txKitchen;
+          u.bar += txBar;
+          u.sum += txTotal;
         }
       } catch {
         // пропускаємо проблемну транзакцію
@@ -445,17 +454,24 @@ app.get("/api/upsell-sales", async (req, res) => {
       UPSELL_MONTH_CACHE.set(monthKey, { computedAt: now, data: monthMap });
     }
 
-    // --- Збираємо відповідь (всі хто є в місяці + ті хто є сьогодні) ---
+    // --- Збираємо відповідь (всі хто є в місяці + сьогодні) ---
     const allUsers = new Map([...monthMap, ...dayMap]);
     const result = [];
     for (const [uid, data] of allUsers) {
       const dayData = dayMap.get(uid);
       const monthData = monthMap.get(uid);
+      const r = (v) => Math.round((v || 0) * 100) / 100;
       result.push({
         user_id: uid,
         name: data.name,
-        day_sum: dayData ? Math.round(dayData.sum * 100) / 100 : 0,
-        month_sum: monthData ? Math.round(monthData.sum * 100) / 100 : 0,
+        day_sum: r(dayData?.sum),
+        day_sauces: r(dayData?.sauces),
+        day_kitchen: r(dayData?.kitchen),
+        day_bar: r(dayData?.bar),
+        month_sum: r(monthData?.sum),
+        month_sauces: r(monthData?.sauces),
+        month_kitchen: r(monthData?.kitchen),
+        month_bar: r(monthData?.bar),
       });
     }
 
