@@ -251,28 +251,37 @@ export default function App() {
               {upsellData.length === 0 && !upsellLoading ? (
                 <p className="text-gray-500 text-xs text-center py-2">Немає даних</p>
               ) : (
-                <table className="w-full">
+                <table className="w-full text-xs">
                   <thead>
-                    <tr className="text-gray-400 text-xs uppercase">
-                      <th className="text-left pb-1.5 font-medium">Ім'я</th>
-                      <th className="text-right pb-1.5 font-medium">Сьогодні</th>
-                      <th className="text-right pb-1.5 font-medium">Місяць</th>
+                    <tr className="text-gray-400 uppercase tracking-wider border-b border-gray-700">
+                      <th className="text-left pb-2 font-medium">Ім'я</th>
+                      <th className="text-right pb-2 font-medium">Соуси</th>
+                      <th className="text-right pb-2 font-medium">Допи кух</th>
+                      <th className="text-right pb-2 font-medium">Допи бар</th>
+                      <th className="text-right pb-2 font-medium text-green-400">Разом</th>
+                      <th className="text-right pb-2 font-medium text-gray-500">Місяць</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/50">
                     {upsellData.map((row) => (
-                      <tr key={row.user_id}>
-                        <td className="py-1.5 text-sm font-medium text-white">{row.name||"—"}</td>
-                        <td className="py-1.5 text-right text-sm font-bold text-green-400">{money(row.day_sum)} ₴</td>
-                        <td className="py-1.5 text-right text-sm font-semibold text-gray-300">{money(row.month_sum)} ₴</td>
+                      <tr key={row.user_id} className="hover:bg-gray-700/20">
+                        <td className="py-1.5 font-semibold text-white text-sm">{row.name||"—"}</td>
+                        <td className="py-1.5 text-right text-gray-300">{money(row.day_sauces||0)} ₴</td>
+                        <td className="py-1.5 text-right text-gray-300">{money(row.day_kitchen||0)} ₴</td>
+                        <td className="py-1.5 text-right text-gray-300">{money(row.day_bar||0)} ₴</td>
+                        <td className="py-1.5 text-right font-bold text-green-400">{money(row.day_sum)} ₴</td>
+                        <td className="py-1.5 text-right font-semibold text-gray-500">{money(row.month_sum)} ₴</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 border-gray-600">
-                      <td className="pt-1.5 text-xs text-gray-400 font-bold uppercase">Разом</td>
-                      <td className="pt-1.5 text-right text-sm font-bold text-green-400">{money(upsellData.reduce((s,r)=>s+r.day_sum,0))} ₴</td>
-                      <td className="pt-1.5 text-right text-sm font-bold text-gray-300">{money(upsellData.reduce((s,r)=>s+r.month_sum,0))} ₴</td>
+                      <td className="pt-2 text-xs text-gray-400 font-bold uppercase">Разом</td>
+                      <td className="pt-2 text-right text-gray-300">{money(upsellData.reduce((s,r)=>s+(r.day_sauces||0),0))} ₴</td>
+                      <td className="pt-2 text-right text-gray-300">{money(upsellData.reduce((s,r)=>s+(r.day_kitchen||0),0))} ₴</td>
+                      <td className="pt-2 text-right text-gray-300">{money(upsellData.reduce((s,r)=>s+(r.day_bar||0),0))} ₴</td>
+                      <td className="pt-2 text-right font-bold text-green-400">{money(upsellData.reduce((s,r)=>s+r.day_sum,0))} ₴</td>
+                      <td className="pt-2 text-right font-bold text-gray-500">{money(upsellData.reduce((s,r)=>s+r.month_sum,0))} ₴</td>
                     </tr>
                   </tfoot>
                 </table>
