@@ -242,12 +242,12 @@ export default function App() {
           </div>
 
           {/* ВИТОРГ СОУСИ/ДОПИ */}
-          <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
-            <div className="px-3 py-2 border-b border-gray-700 flex items-center justify-between">
+          <div className="bg-gray-800 rounded-xl border border-gray-700 flex-1 flex flex-col min-h-0">
+            <div className="px-3 py-2 border-b border-gray-700 flex items-center justify-between shrink-0">
               <h2 className="text-sm font-bold text-white">🔥 Виторг соуси/допи</h2>
               {upsellLoading && <span className="text-xs text-gray-500 animate-pulse">завантаження...</span>}
             </div>
-            <div className="p-2">
+            <div className="p-2 flex-1">
               {upsellData.length === 0 && !upsellLoading ? (
                 <p className="text-gray-500 text-xs text-center py-2">Немає даних</p>
               ) : (
