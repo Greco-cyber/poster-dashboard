@@ -445,14 +445,16 @@ app.get("/api/upsell-sales", async (req, res) => {
       UPSELL_MONTH_CACHE.set(monthKey, { computedAt: now, data: monthMap });
     }
 
-    // --- Збираємо відповідь (тільки ті хто є в дні) ---
+    // --- Збираємо відповідь (всі хто є в місяці + ті хто є сьогодні) ---
+    const allUsers = new Map([...monthMap, ...dayMap]);
     const result = [];
-    for (const [uid, dayData] of dayMap) {
+    for (const [uid, data] of allUsers) {
+      const dayData = dayMap.get(uid);
       const monthData = monthMap.get(uid);
       result.push({
         user_id: uid,
-        name: dayData.name,
-        day_sum: Math.round(dayData.sum * 100) / 100,
+        name: data.name,
+        day_sum: dayData ? Math.round(dayData.sum * 100) / 100 : 0,
         month_sum: monthData ? Math.round(monthData.sum * 100) / 100 : 0,
       });
     }
