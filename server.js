@@ -325,9 +325,8 @@ async function ensureProductBasePrices() {
         if (raw != null) price = Number(raw) / 100;
       }
 
-      const workshop = Number(p.workshop || 0);
       if (price !== null && price > 0) {
-        map.set(pid, { price, workshop });
+        map.set(pid, price);
       }
     }
 
@@ -371,9 +370,7 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
         });
         const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
 
-        let txSauces = 0;   // cat 17 — СОУСИ
-        let txKitchen = 0;  // cat 37 + модифікатори кухні
-        let txBar = 0;      // cat 41 + модифікатори бару
+        let txUpsell = 0;
 
         for (const p of products) {
           const catId = Number(p.category_id);
@@ -382,43 +379,28 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
           const payedSum = Number(p.payed_sum || 0); // копійки
           const pid = Number(p.product_id);
 
-          if (catId === 17) {
-            // СОУСИ — окрема позиція
-            txSauces += payedSum / 100;
-          } else if (catId === 37) {
-            // ДОПИ кухня — окрема позиція
-            txKitchen += payedSum / 100;
-          } else if (catId === 41) {
-            // ДОПИ бар — окрема позиція
-            txBar += payedSum / 100;
-          } else if (modId !== "0") {
-            // Модифікатор — дельта, напрямок залежить від цеху товару
-            const info = PRODUCT_BASE_PRICE.get(pid);
-            if (info != null && info.price > 0) {
-              const payedPerUnit = (payedSum / num) / 100;
-              const delta = payedPerUnit - info.price;
+          // А) Соус або доп — окрема позиція в чеку
+          if (UPSELL_CATS.has(catId)) {
+            txUpsell += payedSum / 100; // копійки -> грн
+          }
+          // Б) Модифікатор — тільки дельта ціни
+          else if (modId !== "0") {
+            const basePrice = PRODUCT_BASE_PRICE.get(pid); // грн за 1 шт
+            if (basePrice != null && basePrice > 0) {
+              const payedPerUnit = (payedSum / num) / 100; // грн за 1 шт
+              const delta = payedPerUnit - basePrice;
               if (delta > 0) {
-                // workshop=1 → БАР, решта → КУХНЯ
-                if (info.workshop === 1) {
-                  txBar += delta * num;
-                } else {
-                  txKitchen += delta * num;
-                }
+                txUpsell += delta * num;
               }
             }
           }
         }
 
-        const txTotal = txSauces + txKitchen + txBar;
-        if (txTotal > 0) {
+        if (txUpsell > 0) {
           if (!userSums.has(uid)) {
-            userSums.set(uid, { name, sauces: 0, kitchen: 0, bar: 0, sum: 0 });
+            userSums.set(uid, { name, sum: 0 });
           }
-          const u = userSums.get(uid);
-          u.sauces += txSauces;
-          u.kitchen += txKitchen;
-          u.bar += txBar;
-          u.sum += txTotal;
+          userSums.get(uid).sum += txUpsell;
         }
       } catch {
         // пропускаємо проблемну транзакцію
@@ -463,21 +445,15 @@ app.get("/api/upsell-sales", async (req, res) => {
       UPSELL_MONTH_CACHE.set(monthKey, { computedAt: now, data: monthMap });
     }
 
-    // --- Збираємо відповідь (всі хто є в місяці + сьогодні) ---
-    const allUsers = new Map([...monthMap, ...dayMap]);
+    // --- Збираємо відповідь (тільки ті хто є в дні) ---
     const result = [];
-    for (const [uid, data] of allUsers) {
-      const dayData = dayMap.get(uid);
+    for (const [uid, dayData] of dayMap) {
       const monthData = monthMap.get(uid);
-      const r = (v) => Math.round((v || 0) * 100) / 100;
       result.push({
         user_id: uid,
-        name: data.name,
-        day_sum: r(dayData?.sum),
-        day_sauces: r(dayData?.sauces),
-        day_kitchen: r(dayData?.kitchen),
-        day_bar: r(dayData?.bar),
-        month_sum: r(monthData?.sum),
+        name: dayData.name,
+        day_sum: Math.round(dayData.sum * 100) / 100,
+        month_sum: monthData ? Math.round(monthData.sum * 100) / 100 : 0,
       });
     }
 
@@ -492,3 +468,207 @@ app.get("/api/upsell-sales", async (req, res) => {
 
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`API server listening on ${port}`));
+
+// -------------------- UPSELL DETAIL ENDPOINT --------------------
+app.get("/api/upsell-detail", async (req, res) => {
+  try {
+    if (!TOKEN)
+      return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom, format = "html" } = req.query;
+
+    await ensureProductBasePrices();
+
+    const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
+    const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
+
+    const userDetails = new Map();
+
+    const BATCH = 10;
+    for (let i = 0; i < transactions.length; i += BATCH) {
+      const batch = transactions.slice(i, i + BATCH);
+      await Promise.all(batch.map(async (tx) => {
+        const uid = String(tx.user_id);
+        const name = String(tx.name || "");
+        const txId = String(tx.transaction_id);
+        const time = String(tx.date_close_date || "");
+
+        try {
+          const prodResp = await poster("dash.getTransactionProducts", { transaction_id: txId });
+          const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
+
+          const lines = [];
+          let checkSauces = 0, checkKitchen = 0, checkBar = 0;
+
+          for (const p of products) {
+            const catId = Number(p.category_id);
+            const modId = String(p.modification_id || "0");
+            const num = Number(p.num || 1);
+            const payedSum = Number(p.payed_sum || 0);
+            const pid = Number(p.product_id);
+            const productName = String(p.product_name || "");
+            const modName = String(p.modificator_name || "");
+
+            let amount = 0;
+            let type = null;
+
+            if (catId === 17) {
+              amount = payedSum / 100;
+              type = "Соус";
+              checkSauces += amount;
+            } else if (catId === 37) {
+              amount = payedSum / 100;
+              type = "Доп кухня";
+              checkKitchen += amount;
+            } else if (catId === 41) {
+              amount = payedSum / 100;
+              type = "Доп бар";
+              checkBar += amount;
+            } else if (modId !== "0") {
+              const info = PRODUCT_BASE_PRICE.get(pid);
+              if (info && info.price > 0) {
+                const payedPerUnit = (payedSum / num) / 100;
+                const delta = payedPerUnit - info.price;
+                if (delta > 0) {
+                  amount = Math.round(delta * num * 100) / 100;
+                  if (info.workshop === 1) {
+                    type = "Мод бар";
+                    checkBar += amount;
+                  } else {
+                    type = "Мод кухня";
+                    checkKitchen += amount;
+                  }
+                }
+              }
+            }
+
+            if (type && amount > 0) {
+              lines.push({
+                product: modName ? `${productName} ${modName}` : productName,
+                qty: num,
+                amount: Math.round(amount * 100) / 100,
+                type,
+              });
+            }
+          }
+
+          const checkTotal = checkSauces + checkKitchen + checkBar;
+          if (checkTotal > 0) {
+            if (!userDetails.has(uid)) {
+              userDetails.set(uid, { name, checks: [], totals: { sauces: 0, kitchen: 0, bar: 0, sum: 0 } });
+            }
+            const u = userDetails.get(uid);
+            u.checks.push({
+              transaction_id: txId,
+              time,
+              lines,
+              sauces: Math.round(checkSauces * 100) / 100,
+              kitchen: Math.round(checkKitchen * 100) / 100,
+              bar: Math.round(checkBar * 100) / 100,
+              total: Math.round(checkTotal * 100) / 100,
+            });
+            u.totals.sauces += checkSauces;
+            u.totals.kitchen += checkKitchen;
+            u.totals.bar += checkBar;
+            u.totals.sum += checkTotal;
+          }
+        } catch { /* skip */ }
+      }));
+    }
+
+    const round = v => Math.round((v || 0) * 100) / 100;
+    const sorted = [...userDetails.values()].sort((a, b) => b.totals.sum - a.totals.sum);
+
+    // ---- CSV ----
+    if (format === "csv") {
+      const rows = [["Офіціант", "Чек №", "Час", "Позиція", "К-сть", "Тип", "Сума (грн)"]];
+
+      for (const u of sorted) {
+        const sortedChecks = u.checks.sort((a, b) => a.time.localeCompare(b.time));
+        for (const ch of sortedChecks) {
+          for (const line of ch.lines) {
+            rows.push([
+              u.name,
+              ch.transaction_id,
+              ch.time,
+              line.product,
+              line.qty,
+              line.type,
+              String(line.amount).replace(".", ","),
+            ]);
+          }
+          // Підсумок по чеку
+          rows.push([
+            u.name,
+            ch.transaction_id,
+            ch.time,
+            "--- ПІДСУМОК ЧЕКУ ---",
+            "",
+            "",
+            String(ch.total).replace(".", ","),
+          ]);
+        }
+        // Підсумок по офіціанту
+        rows.push([
+          u.name, "", "", "=== ПІДСУМОК ОФІЦІАНТА ===",
+          "", "Соуси: " + round(u.totals.sauces),
+          String(round(u.totals.sum)).replace(".", ","),
+        ]);
+        rows.push([]); // порожній рядок між офіціантами
+      }
+
+      const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(";")).join("\n");
+      const filename = `upsell_${dateFrom}.csv`;
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send("\uFEFF" + csv); // BOM для коректного відкриття в Excel
+      return;
+    }
+
+    // ---- HTML ----
+    let html = `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
+<title>Деталі допів — ${dateFrom}</title>
+<style>
+  body{font-family:monospace;background:#1a1a2e;color:#eee;padding:20px}
+  h1{color:#f0a500}h2{color:#00d4ff;margin-top:30px;border-bottom:1px solid #444;padding-bottom:5px}
+  .check{background:#16213e;border-left:3px solid #0f3460;margin:10px 0;padding:10px 15px;border-radius:4px}
+  .check-header{color:#aaa;font-size:12px;margin-bottom:6px}
+  .line{padding:2px 0}
+  .Соус{color:#1dd1a1}.Доп-кухня,.Мод-кухня{color:#ff9f43}.Доп-бар,.Мод-бар{color:#54a0ff}
+  .badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;margin-left:6px}
+  .check-total{margin-top:8px;padding-top:6px;border-top:1px dashed #444;font-size:13px;color:#f9ca24}
+  .user-total{background:#0f3460;padding:8px 15px;border-radius:4px;margin-top:5px;color:#f9ca24;font-weight:bold}
+  .csv-btn{display:inline-block;margin-top:10px;padding:8px 16px;background:#27ae60;color:#fff;text-decoration:none;border-radius:6px;font-size:14px}
+</style></head><body>
+<h1>🔥 Деталі допів/соусів — ${dateFrom}</h1>
+<a class="csv-btn" href="/api/upsell-detail?dateFrom=${dateFrom}&dateTo=${dateTo}&format=csv">⬇ Скачати CSV</a>`;
+
+    for (const u of sorted) {
+      html += `<h2>👤 ${u.name}</h2>`;
+      const sortedChecks = u.checks.sort((a, b) => a.time.localeCompare(b.time));
+      for (const ch of sortedChecks) {
+        html += `<div class="check"><div class="check-header">Чек #${ch.transaction_id} · ${ch.time}</div>`;
+        for (const line of ch.lines) {
+          const cls = line.type.replace(" ", "-");
+          const qty = line.qty > 1 ? ` × ${line.qty}` : "";
+          html += `<div class="line"><span>${line.product}${qty}</span><span class="badge ${cls}">${line.type}</span> → <span class="${cls}">+${line.amount} ₴</span></div>`;
+        }
+        html += `<div class="check-total">`;
+        if (ch.sauces) html += `Соуси: ${round(ch.sauces)} ₴ &nbsp;`;
+        if (ch.kitchen) html += `Кухня: ${round(ch.kitchen)} ₴ &nbsp;`;
+        if (ch.bar) html += `Бар: ${round(ch.bar)} ₴ &nbsp;`;
+        html += `| <strong>Разом: ${ch.total} ₴</strong></div></div>`;
+      }
+      html += `<div class="user-total">Соуси: ${round(u.totals.sauces)} ₴ &nbsp;|&nbsp; Допи кух: ${round(u.totals.kitchen)} ₴ &nbsp;|&nbsp; Допи бар: ${round(u.totals.bar)} ₴ &nbsp;|&nbsp; <span style="color:#ff6b6b">РАЗОМ: ${round(u.totals.sum)} ₴</span></div>`;
+    }
+    html += `</body></html>`;
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error", detail: String(e) });
+  }
+});
