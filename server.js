@@ -475,7 +475,70 @@ app.get("/api/upsell-detail", async (req, res) => {
     if (!TOKEN)
       return res.status(500).json({ error: "POSTER_TOKEN is not set" });
 
-    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom, format = "html" } = req.query;
+    const { format = "html" } = req.query;
+    let { dateFrom, dateTo } = req.query;
+
+    // Якщо дати не передані — показуємо форму вибору
+    if (!dateFrom && format === "html") {
+      const today = todayYYYYMMDD();
+      const todayInput = `${today.slice(0,4)}-${today.slice(4,6)}-${today.slice(6,8)}`;
+      const html = `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
+<title>Деталі допів — GRECO</title>
+<style>
+  body{font-family:sans-serif;background:#1a1a2e;color:#eee;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+  .card{background:#16213e;padding:40px;border-radius:12px;width:400px;box-shadow:0 4px 20px rgba(0,0,0,0.4)}
+  h1{color:#f0a500;margin:0 0 24px;font-size:22px}
+  label{display:block;color:#aaa;font-size:13px;margin-bottom:4px;margin-top:16px}
+  input[type=date]{width:100%;padding:10px;background:#0f3460;border:1px solid #444;border-radius:6px;color:#fff;font-size:15px;box-sizing:border-box}
+  .btns{display:flex;gap:10px;margin-top:24px}
+  .btn{flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:bold;cursor:pointer}
+  .btn-html{background:#0f3460;color:#00d4ff}
+  .btn-csv{background:#27ae60;color:#fff}
+  .btn:hover{opacity:0.85}
+  .presets{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .preset{padding:5px 10px;background:#0f3460;border:1px solid #444;border-radius:4px;color:#aaa;font-size:12px;cursor:pointer}
+  .preset:hover{background:#1a3a6e;color:#fff}
+</style></head><body>
+<div class="card">
+  <h1>🔥 Деталі допів/соусів</h1>
+  <label>Дата від</label>
+  <input type="date" id="from" value="${todayInput}">
+  <label>Дата до</label>
+  <input type="date" id="to" value="${todayInput}">
+  <div class="presets">
+    <span class="preset" onclick="setPreset(0)">Сьогодні</span>
+    <span class="preset" onclick="setPreset(1)">Вчора</span>
+    <span class="preset" onclick="setPreset(7)">Тиждень</span>
+    <span class="preset" onclick="setPreset(30)">Місяць</span>
+  </div>
+  <div class="btns">
+    <button class="btn btn-html" onclick="go('html')">👁 Переглянути</button>
+    <button class="btn btn-csv" onclick="go('csv')">⬇ Скачати CSV</button>
+  </div>
+</div>
+<script>
+function fmt(d){return d.toISOString().slice(0,10)}
+function setPreset(days){
+  const to=new Date();
+  const from=new Date();
+  if(days===1){to.setDate(to.getDate()-1);from.setDate(from.getDate()-1);}
+  else if(days>1){from.setDate(from.getDate()-days);}
+  document.getElementById('from').value=fmt(from);
+  document.getElementById('to').value=fmt(to);
+}
+function go(fmt){
+  const from=document.getElementById('from').value.replace(/-/g,'');
+  const to=document.getElementById('to').value.replace(/-/g,'');
+  if(!from||!to){alert('Вкажіть дати');return;}
+  window.location.href='/api/upsell-detail?dateFrom='+from+'&dateTo='+to+'&format='+fmt;
+}
+</script></body></html>`;
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.send(html);
+    }
+
+    if (!dateFrom) dateFrom = todayYYYYMMDD();
+    if (!dateTo) dateTo = dateFrom;
 
     await ensureProductBasePrices();
 
@@ -483,8 +546,8 @@ app.get("/api/upsell-detail", async (req, res) => {
     const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
 
     const userDetails = new Map();
-
     const BATCH = 10;
+
     for (let i = 0; i < transactions.length; i += BATCH) {
       const batch = transactions.slice(i, i + BATCH);
       await Promise.all(batch.map(async (tx) => {
@@ -509,35 +572,22 @@ app.get("/api/upsell-detail", async (req, res) => {
             const productName = String(p.product_name || "");
             const modName = String(p.modificator_name || "");
 
-            let amount = 0;
-            let type = null;
+            let amount = 0, type = null;
 
             if (catId === 17) {
-              amount = payedSum / 100;
-              type = "Соус";
-              checkSauces += amount;
+              amount = payedSum / 100; type = "Соус"; checkSauces += amount;
             } else if (catId === 37) {
-              amount = payedSum / 100;
-              type = "Доп кухня";
-              checkKitchen += amount;
+              amount = payedSum / 100; type = "Доп кухня"; checkKitchen += amount;
             } else if (catId === 41) {
-              amount = payedSum / 100;
-              type = "Доп бар";
-              checkBar += amount;
+              amount = payedSum / 100; type = "Доп бар"; checkBar += amount;
             } else if (modId !== "0") {
               const info = PRODUCT_BASE_PRICE.get(pid);
               if (info && info.price > 0) {
-                const payedPerUnit = (payedSum / num) / 100;
-                const delta = payedPerUnit - info.price;
+                const delta = (payedSum / num / 100) - info.price;
                 if (delta > 0) {
                   amount = Math.round(delta * num * 100) / 100;
-                  if (info.workshop === 1) {
-                    type = "Мод бар";
-                    checkBar += amount;
-                  } else {
-                    type = "Мод кухня";
-                    checkKitchen += amount;
-                  }
+                  if (info.workshop === 1) { type = "Мод бар"; checkBar += amount; }
+                  else { type = "Мод кухня"; checkKitchen += amount; }
                 }
               }
             }
@@ -545,85 +595,48 @@ app.get("/api/upsell-detail", async (req, res) => {
             if (type && amount > 0) {
               lines.push({
                 product: modName ? `${productName} ${modName}` : productName,
-                qty: num,
-                amount: Math.round(amount * 100) / 100,
-                type,
+                qty: num, amount: Math.round(amount * 100) / 100, type,
               });
             }
           }
 
           const checkTotal = checkSauces + checkKitchen + checkBar;
           if (checkTotal > 0) {
-            if (!userDetails.has(uid)) {
-              userDetails.set(uid, { name, checks: [], totals: { sauces: 0, kitchen: 0, bar: 0, sum: 0 } });
-            }
+            if (!userDetails.has(uid)) userDetails.set(uid, { name, checks: [], totals: { sauces:0, kitchen:0, bar:0, sum:0 } });
             const u = userDetails.get(uid);
-            u.checks.push({
-              transaction_id: txId,
-              time,
-              lines,
-              sauces: Math.round(checkSauces * 100) / 100,
-              kitchen: Math.round(checkKitchen * 100) / 100,
-              bar: Math.round(checkBar * 100) / 100,
-              total: Math.round(checkTotal * 100) / 100,
-            });
-            u.totals.sauces += checkSauces;
-            u.totals.kitchen += checkKitchen;
-            u.totals.bar += checkBar;
-            u.totals.sum += checkTotal;
+            u.checks.push({ transaction_id: txId, time, lines,
+              sauces: Math.round(checkSauces*100)/100,
+              kitchen: Math.round(checkKitchen*100)/100,
+              bar: Math.round(checkBar*100)/100,
+              total: Math.round(checkTotal*100)/100 });
+            u.totals.sauces += checkSauces; u.totals.kitchen += checkKitchen;
+            u.totals.bar += checkBar; u.totals.sum += checkTotal;
           }
         } catch { /* skip */ }
       }));
     }
 
-    const round = v => Math.round((v || 0) * 100) / 100;
-    const sorted = [...userDetails.values()].sort((a, b) => b.totals.sum - a.totals.sum);
+    const round = v => Math.round((v||0)*100)/100;
+    const sorted = [...userDetails.values()].sort((a,b) => b.totals.sum - a.totals.sum);
+    const backUrl = "/api/upsell-detail";
 
     // ---- CSV ----
     if (format === "csv") {
-      const rows = [["Офіціант", "Чек №", "Час", "Позиція", "К-сть", "Тип", "Сума (грн)"]];
-
+      const rows = [["Офіціант","Чек №","Час","Позиція","К-сть","Тип","Сума (грн)"]];
       for (const u of sorted) {
-        const sortedChecks = u.checks.sort((a, b) => a.time.localeCompare(b.time));
-        for (const ch of sortedChecks) {
+        for (const ch of u.checks.sort((a,b)=>a.time.localeCompare(b.time))) {
           for (const line of ch.lines) {
-            rows.push([
-              u.name,
-              ch.transaction_id,
-              ch.time,
-              line.product,
-              line.qty,
-              line.type,
-              String(line.amount).replace(".", ","),
-            ]);
+            rows.push([u.name, ch.transaction_id, ch.time, line.product, line.qty, line.type, String(line.amount).replace(".",",")]);
           }
-          // Підсумок по чеку
-          rows.push([
-            u.name,
-            ch.transaction_id,
-            ch.time,
-            "--- ПІДСУМОК ЧЕКУ ---",
-            "",
-            "",
-            String(ch.total).replace(".", ","),
-          ]);
+          rows.push([u.name, ch.transaction_id, ch.time, "--- ПІДСУМОК ЧЕКУ ---", "", "", String(ch.total).replace(".",",")]);
         }
-        // Підсумок по офіціанту
-        rows.push([
-          u.name, "", "", "=== ПІДСУМОК ОФІЦІАНТА ===",
-          "", "Соуси: " + round(u.totals.sauces),
-          String(round(u.totals.sum)).replace(".", ","),
-        ]);
-        rows.push([]); // порожній рядок між офіціантами
+        rows.push([u.name,"","","=== ПІДСУМОК ОФІЦІАНТА ===","",`Соуси:${round(u.totals.sauces)} Кух:${round(u.totals.kitchen)} Бар:${round(u.totals.bar)}`, String(round(u.totals.sum)).replace(".",",")]);
+        rows.push([]);
       }
-
-      const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(";")).join("\n");
-      const filename = `upsell_${dateFrom}.csv`;
-
-      res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-      res.send("\uFEFF" + csv); // BOM для коректного відкриття в Excel
-      return;
+      const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\n");
+      res.setHeader("Content-Type","text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition",`attachment; filename="upsell_${dateFrom}_${dateTo}.csv"`);
+      return res.send("\uFEFF"+csv);
     }
 
     // ---- HTML ----
@@ -634,23 +647,27 @@ app.get("/api/upsell-detail", async (req, res) => {
   h1{color:#f0a500}h2{color:#00d4ff;margin-top:30px;border-bottom:1px solid #444;padding-bottom:5px}
   .check{background:#16213e;border-left:3px solid #0f3460;margin:10px 0;padding:10px 15px;border-radius:4px}
   .check-header{color:#aaa;font-size:12px;margin-bottom:6px}
-  .line{padding:2px 0}
   .Соус{color:#1dd1a1}.Доп-кухня,.Мод-кухня{color:#ff9f43}.Доп-бар,.Мод-бар{color:#54a0ff}
   .badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;margin-left:6px}
   .check-total{margin-top:8px;padding-top:6px;border-top:1px dashed #444;font-size:13px;color:#f9ca24}
   .user-total{background:#0f3460;padding:8px 15px;border-radius:4px;margin-top:5px;color:#f9ca24;font-weight:bold}
-  .csv-btn{display:inline-block;margin-top:10px;padding:8px 16px;background:#27ae60;color:#fff;text-decoration:none;border-radius:6px;font-size:14px}
+  .topbar{display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
+  .btn{padding:8px 16px;border-radius:6px;font-size:13px;text-decoration:none;font-weight:bold}
+  .btn-back{background:#444;color:#fff}
+  .btn-csv{background:#27ae60;color:#fff}
 </style></head><body>
-<h1>🔥 Деталі допів/соусів — ${dateFrom}</h1>
-<a class="csv-btn" href="/api/upsell-detail?dateFrom=${dateFrom}&dateTo=${dateTo}&format=csv">⬇ Скачати CSV</a>`;
+<div class="topbar">
+  <h1 style="margin:0">🔥 Деталі допів — ${dateFrom}${dateFrom!==dateTo?" → "+dateTo:""}</h1>
+  <a class="btn btn-back" href="${backUrl}">← Назад</a>
+  <a class="btn btn-csv" href="/api/upsell-detail?dateFrom=${dateFrom}&dateTo=${dateTo}&format=csv">⬇ Скачати CSV</a>
+</div>`;
 
     for (const u of sorted) {
       html += `<h2>👤 ${u.name}</h2>`;
-      const sortedChecks = u.checks.sort((a, b) => a.time.localeCompare(b.time));
-      for (const ch of sortedChecks) {
+      for (const ch of u.checks.sort((a,b)=>a.time.localeCompare(b.time))) {
         html += `<div class="check"><div class="check-header">Чек #${ch.transaction_id} · ${ch.time}</div>`;
         for (const line of ch.lines) {
-          const cls = line.type.replace(" ", "-");
+          const cls = line.type.replace(" ","-");
           const qty = line.qty > 1 ? ` × ${line.qty}` : "";
           html += `<div class="line"><span>${line.product}${qty}</span><span class="badge ${cls}">${line.type}</span> → <span class="${cls}">+${line.amount} ₴</span></div>`;
         }
@@ -663,8 +680,7 @@ app.get("/api/upsell-detail", async (req, res) => {
       html += `<div class="user-total">Соуси: ${round(u.totals.sauces)} ₴ &nbsp;|&nbsp; Допи кух: ${round(u.totals.kitchen)} ₴ &nbsp;|&nbsp; Допи бар: ${round(u.totals.bar)} ₴ &nbsp;|&nbsp; <span style="color:#ff6b6b">РАЗОМ: ${round(u.totals.sum)} ₴</span></div>`;
     }
     html += `</body></html>`;
-
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Content-Type","text/html; charset=utf-8");
     res.send(html);
 
   } catch (e) {
