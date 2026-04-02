@@ -7,7 +7,6 @@ app.use(cors());
 
 const fetchFn = global.fetch;
 
-// Берем значения либо из POSTER_*, либо из REACT_APP_* (как у тебя в Render)
 const TOKEN =
   process.env.POSTER_TOKEN ||
   process.env.REACT_APP_POSTER_TOKEN ||
@@ -18,7 +17,6 @@ const ACCOUNT =
   process.env.REACT_APP_POSTER_ACCOUNT ||
   "";
 
-// Если POSTER_BASE_URL не задан, пробуем собрать его из ACCOUNT
 const POSTER_BASE =
   process.env.POSTER_BASE_URL ||
   process.env.REACT_APP_POSTER_BASE_URL ||
@@ -33,66 +31,48 @@ function todayYYYYMMDD() {
 async function poster(method, params = {}) {
   const url = new URL(`${POSTER_BASE}/${method}`);
   url.searchParams.set("token", TOKEN);
-
   for (const [k, v] of Object.entries(params)) {
     if (v != null) url.searchParams.set(k, String(v));
   }
-
   const r = await fetchFn(url.toString());
   const t = await r.text();
-
   let j;
-  try {
-    j = JSON.parse(t);
-  } catch {
-    j = { raw: t };
-  }
-
+  try { j = JSON.parse(t); } catch { j = { raw: t }; }
   if (!r.ok) throw new Error(`${method} HTTP ${r.status}: ${t.slice(0, 400)}`);
   return j;
 }
 
-// -------------------- КЭШ: категории --------------------
+// -------------------- КЕШ: категорії --------------------
 let CATS_CACHE_AT = 0;
-let CAT_NAME = new Map(); // cid -> name
+let CAT_NAME = new Map();
 const CATS_TTL_MS = 30 * 60 * 1000;
 
 async function ensureCategories() {
   const now = Date.now();
   if (CAT_NAME.size && now - CATS_CACHE_AT < CATS_TTL_MS) return;
-
   try {
     const j = await poster("menu.getCategories");
     const arr = Array.isArray(j?.response) ? j.response : [];
     const map = new Map();
-
     for (const c of arr) {
       const cid = Number(c.category_id ?? c.id ?? c.menu_category_id);
       const name = String(c.category_name ?? c.name ?? "");
       if (Number.isFinite(cid)) map.set(cid, name);
     }
-
-    if (map.size) {
-      CAT_NAME = map;
-      CATS_CACHE_AT = now;
-    }
-  } catch {
-    // ignore
-  }
+    if (map.size) { CAT_NAME = map; CATS_CACHE_AT = now; }
+  } catch { /* ignore */ }
 }
 
-// -------------------- КЭШ: продукты --------------------
+// -------------------- КЕШ: продукти --------------------
 let PRODUCTS_CACHE_AT = 0;
-let PRODUCT_INFO = new Map(); // pid -> { name, category_id }
+let PRODUCT_INFO = new Map();
 const PRODUCT_TTL_MS = 15 * 60 * 1000;
 
 async function ensureProducts() {
   const now = Date.now();
   if (PRODUCT_INFO.size && now - PRODUCTS_CACHE_AT < PRODUCT_TTL_MS) return;
-
   const j = await poster("menu.getProducts");
   const arr = Array.isArray(j?.response) ? j.response : [];
-
   const map = new Map();
   for (const p of arr) {
     const pid = Number(p.product_id ?? p.id ?? p.menu_id ?? p.good_id);
@@ -102,7 +82,6 @@ async function ensureProducts() {
       map.set(pid, { name, category_id: Number.isFinite(cid) ? cid : null });
     }
   }
-
   PRODUCT_INFO = map;
   PRODUCTS_CACHE_AT = now;
 }
@@ -110,8 +89,7 @@ async function ensureProducts() {
 // -------------------- WAITERS --------------------
 app.get("/api/waiters-sales", async (req, res) => {
   try {
-    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN (or REACT_APP_POSTER_TOKEN) is not set" });
-
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
     const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
     const data = await poster("dash.getWaitersSales", { dateFrom, dateTo });
     res.json(data);
@@ -121,7 +99,7 @@ app.get("/api/waiters-sales", async (req, res) => {
   }
 });
 
-// -------------------- ПРОДАЖИ ПО ТОВАРАМ (для кофе) --------------------
+// -------------------- ПРОДАЖІ ПО ТОВАРАХ (для кави) --------------------
 async function fetchProductsSales({ dateFrom, dateTo }) {
   const methods = [
     { m: "dash.getProductsSales", p: { dateFrom, dateTo } },
@@ -131,51 +109,33 @@ async function fetchProductsSales({ dateFrom, dateTo }) {
     { m: "dash.getProducts", p: { dateFrom, dateTo } },
     { m: "dash.getProducts", p: {} },
   ];
-
   for (const cand of methods) {
     try {
       const j = await poster(cand.m, cand.p);
-
-      const arr =
-        [j?.response, j?.response?.products, j?.products, j?.data].find(Array.isArray) || [];
-
+      const arr = [j?.response, j?.response?.products, j?.products, j?.data].find(Array.isArray) || [];
       if (!arr.length) continue;
-
-      const norm = arr
-        .map((x) => {
-          const product_id = Number(x.product_id ?? x.menu_id ?? x.id ?? x.good_id);
-          if (!Number.isFinite(product_id)) return null;
-
-          const name = String(x.product_name ?? x.name ?? "");
-          const qty = Number(x.count ?? x.quantity ?? x.qty ?? x.amount ?? 0) || 0;
-
-          return { product_id, name, qty };
-        })
-        .filter(Boolean);
-
+      const norm = arr.map((x) => {
+        const product_id = Number(x.product_id ?? x.menu_id ?? x.id ?? x.good_id);
+        if (!Number.isFinite(product_id)) return null;
+        const name = String(x.product_name ?? x.name ?? "");
+        const qty = Number(x.count ?? x.quantity ?? x.qty ?? x.amount ?? 0) || 0;
+        return { product_id, name, qty };
+      }).filter(Boolean);
       if (norm.length) return { items: norm, used: cand };
-    } catch {
-      // next
-    }
+    } catch { /* next */ }
   }
-
   return { items: null, used: null };
 }
 
 // -------------------- BAR SALES --------------------
 app.get("/api/bar-sales", async (req, res) => {
   try {
-    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN (or REACT_APP_POSTER_TOKEN) is not set" });
-
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
     const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
-
-    // Категории бара
     const BAR_CATS = [9, 14, 34];
     const want = new Set(BAR_CATS);
-
     await ensureCategories();
 
-    // 1) Categories qty + name
     let categories = BAR_CATS.map((cid) => ({
       category_id: cid,
       name: CAT_NAME.get(cid) || `Категорія ${cid}`,
@@ -185,102 +145,50 @@ app.get("/api/bar-sales", async (req, res) => {
     try {
       const cats = await poster("dash.getCategoriesSales", { dateFrom, dateTo });
       const resp = Array.isArray(cats?.response) ? cats.response : [];
-
       const map = new Map();
       for (const x of resp) {
         const cid = Number(x.category_id);
         if (!want.has(cid)) continue;
-
-        const nameFromDash = String(x.category_name ?? x.name ?? "");
-        const name = CAT_NAME.get(cid) || nameFromDash || `Категорія ${cid}`;
-
-        map.set(cid, {
-          category_id: cid,
-          name,
-          qty: Number(x.count ?? x.qty ?? 0),
-        });
+        const name = CAT_NAME.get(cid) || String(x.category_name ?? x.name ?? "") || `Категорія ${cid}`;
+        map.set(cid, { category_id: cid, name, qty: Number(x.count ?? x.qty ?? 0) });
       }
-
       categories = BAR_CATS.map((cid) => map.get(cid) || {
-        category_id: cid,
-        name: CAT_NAME.get(cid) || `Категорія ${cid}`,
-        qty: 0,
+        category_id: cid, name: CAT_NAME.get(cid) || `Категорія ${cid}`, qty: 0,
       });
-    } catch {
-      // keep defaults
-    }
+    } catch { /* keep defaults */ }
 
-    // 2) Coffee shots mapping (кат.34 + кат.47)
-    // ✅ 530=1, 531=2, 423=2
     const shotsPerProduct = new Map([
-      // cat 34
-      [230, 1],
-      [485, 1],
-      [307, 2],
-      [231, 1],
-      [316, 1],
-      [406, 1],
-      [183, 1],
-      [182, 1],
-      [317, 1],
-
-      // ✅ кава в зал
-      [425, 1],
-      [424, 1],
-      [441, 1],
-      [422, 1],
-      [423, 2],
-
-      // cat 47 (штат)
-      [529, 1],
-      [530, 1], // 🔁
-      [531, 2], // ✅
-      [533, 1],
-      [534, 1],
-      [535, 1],
+      [230,1],[485,1],[307,2],[231,1],[316,1],[406,1],[183,1],[182,1],[317,1],
+      [425,1],[424,1],[441,1],[422,1],[423,2],
+      [529,1],[530,1],[531,2],[533,1],[534,1],[535,1],
     ]);
 
     await ensureProducts();
-
-    let byProduct = new Map();
-    let totalQty = 0;
-    let totalZak = 0;
-
+    let byProduct = new Map(), totalQty = 0, totalZak = 0;
     const prodSales = await fetchProductsSales({ dateFrom, dateTo });
 
     if (prodSales.items) {
       for (const it of prodSales.items) {
         const pid = Number(it.product_id);
         if (!shotsPerProduct.has(pid)) continue;
-
         const qty = Number(it.qty || 0);
         if (!qty) continue;
-
         const per = shotsPerProduct.get(pid);
         const zak = qty * per;
-
-        totalQty += qty;
-        totalZak += zak;
-
+        totalQty += qty; totalZak += zak;
         const info = PRODUCT_INFO.get(pid) || {};
         byProduct.set(pid, {
-          product_id: pid,
-          name: info.name || it.name || "",
+          product_id: pid, name: info.name || it.name || "",
           category_id: info.category_id ?? null,
-          qty,
-          zakladki_per_unit: per,
-          zakladki_total: zak,
+          qty, zakladki_per_unit: per, zakladki_total: zak,
         });
       }
     }
 
     res.json({
-      dateFrom,
-      dateTo,
-      categories,
+      dateFrom, dateTo, categories,
       coffee: {
-        total_qty: totalQty,
-        total_zakladki: totalZak,
+        total_qty: totalQty, total_zakladki: totalZak,
         by_product: [...byProduct.values()].sort((a, b) => b.qty - a.qty),
       },
       debug: { usedProductsSales: prodSales.used || null },
@@ -291,123 +199,107 @@ app.get("/api/bar-sales", async (req, res) => {
   }
 });
 
-// -------------------- КЭШ: базові ціни товарів --------------------
-// product_id -> base_price (грн, вже не копійки)
+// -------------------- КЕШ: базові ціни товарів + workshop --------------------
+// product_id -> { price, workshop }
 let PRODUCT_BASE_PRICE = new Map();
 let PRODUCT_BASE_CACHE_AT = 0;
 const PRODUCT_BASE_TTL_MS = 30 * 60 * 1000;
-const SPOT_ID = 1; // наш spot
+const SPOT_ID = 1;
 
 async function ensureProductBasePrices() {
   const now = Date.now();
   if (PRODUCT_BASE_PRICE.size && now - PRODUCT_BASE_CACHE_AT < PRODUCT_BASE_TTL_MS) return;
-
   try {
     const j = await poster("menu.getProducts");
     const arr = Array.isArray(j?.response) ? j.response : [];
     const map = new Map();
-
     for (const p of arr) {
       const pid = Number(p.product_id ?? p.id);
       if (!Number.isFinite(pid)) continue;
-
       let price = null;
-
-      // Шукаємо ціну для нашого spot_id в spots[]
       if (Array.isArray(p.spots)) {
         const spot = p.spots.find(s => Number(s.spot_id) === SPOT_ID);
-        if (spot) price = Number(spot.price) / 100; // копійки -> грн
+        if (spot) price = Number(spot.price) / 100;
       }
-
-      // Якщо немає в spots — беремо з price object
       if (price === null && p.price && typeof p.price === "object") {
         const raw = p.price[String(SPOT_ID)] ?? p.price["1"];
         if (raw != null) price = Number(raw) / 100;
       }
-
+      const workshop = Number(p.workshop || 0);
       if (price !== null && price > 0) {
-        map.set(pid, price);
+        map.set(pid, { price, workshop });
       }
     }
-
-    if (map.size) {
-      PRODUCT_BASE_PRICE = map;
-      PRODUCT_BASE_CACHE_AT = now;
-    }
+    if (map.size) { PRODUCT_BASE_PRICE = map; PRODUCT_BASE_CACHE_AT = now; }
   } catch (e) {
     console.error("ensureProductBasePrices error:", e);
   }
 }
 
-// -------------------- КЭШ: місячні upsell --------------------
+// -------------------- КЕШ: місячні upsell --------------------
 const UPSELL_MONTH_CACHE = new Map();
 const UPSELL_MONTH_TTL_MS = 30 * 60 * 1000;
-
-// -------------------- UPSELL: категорії --------------------
-const UPSELL_CATS = new Set([17, 37, 41]); // СОУСИ, ДОПИ, ДОПИ БАР
 
 // -------------------- UPSELL: розрахунок за період --------------------
 async function calcUpsellForPeriod(dateFrom, dateTo) {
   const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
   const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
-
   await ensureProductBasePrices();
 
-  const userSums = new Map(); // user_id -> { name, sum }
+  const userSums = new Map(); // uid -> { name, sauces, kitchen, bar, sum }
 
   const BATCH = 10;
   for (let i = 0; i < transactions.length; i += BATCH) {
     const batch = transactions.slice(i, i + BATCH);
-
     await Promise.all(batch.map(async (tx) => {
       const uid = String(tx.user_id);
       const name = String(tx.name || "");
       const txId = String(tx.transaction_id);
-
       try {
-        const prodResp = await poster("dash.getTransactionProducts", {
-          transaction_id: txId,
-        });
+        const prodResp = await poster("dash.getTransactionProducts", { transaction_id: txId });
         const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
 
-        let txUpsell = 0;
+        let txSauces = 0, txKitchen = 0, txBar = 0;
 
         for (const p of products) {
           const catId = Number(p.category_id);
           const modId = String(p.modification_id || "0");
           const num = Number(p.num || 1);
-          const payedSum = Number(p.payed_sum || 0); // копійки
+          const payedSum = Number(p.payed_sum || 0);
           const pid = Number(p.product_id);
 
-          // А) Соус або доп — окрема позиція в чеку
-          if (UPSELL_CATS.has(catId)) {
-            txUpsell += payedSum / 100; // копійки -> грн
-          }
-          // Б) Модифікатор — тільки дельта ціни
-          else if (modId !== "0") {
-            const basePrice = PRODUCT_BASE_PRICE.get(pid); // грн за 1 шт
-            if (basePrice != null && basePrice > 0) {
-              const payedPerUnit = (payedSum / num) / 100; // грн за 1 шт
-              const delta = payedPerUnit - basePrice;
+          if (catId === 17) {
+            txSauces += payedSum / 100;
+          } else if (catId === 37) {
+            txKitchen += payedSum / 100;
+          } else if (catId === 41) {
+            txBar += payedSum / 100;
+          } else if (modId !== "0") {
+            const info = PRODUCT_BASE_PRICE.get(pid);
+            if (info != null && info.price > 0) {
+              const delta = (payedSum / num / 100) - info.price;
               if (delta > 0) {
-                txUpsell += delta * num;
+                if (info.workshop === 1) { txBar += delta * num; }
+                else { txKitchen += delta * num; }
               }
             }
           }
         }
 
-        if (txUpsell > 0) {
+        const txTotal = txSauces + txKitchen + txBar;
+        if (txTotal > 0) {
           if (!userSums.has(uid)) {
-            userSums.set(uid, { name, sum: 0 });
+            userSums.set(uid, { name, sauces: 0, kitchen: 0, bar: 0, sum: 0 });
           }
-          userSums.get(uid).sum += txUpsell;
+          const u = userSums.get(uid);
+          u.sauces += txSauces;
+          u.kitchen += txKitchen;
+          u.bar += txBar;
+          u.sum += txTotal;
         }
-      } catch {
-        // пропускаємо проблемну транзакцію
-      }
+      } catch { /* skip */ }
     }));
   }
-
   return userSums;
 }
 
@@ -421,15 +313,11 @@ function lastDayOfMonthForUpsell(s) {
 // -------------------- UPSELL ENDPOINT --------------------
 app.get("/api/upsell-sales", async (req, res) => {
   try {
-    if (!TOKEN)
-      return res.status(500).json({ error: "POSTER_TOKEN is not set" });
-
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
     const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
 
-    // --- День ---
     const dayMap = await calcUpsellForPeriod(dateFrom, dateTo);
 
-    // --- Місяць ---
     const monthKey = dateFrom.slice(0, 6);
     const mFrom = `${monthKey}01`;
     const mTo = lastDayOfMonthForUpsell(dateFrom);
@@ -437,7 +325,6 @@ app.get("/api/upsell-sales", async (req, res) => {
     let monthMap;
     const cached = UPSELL_MONTH_CACHE.get(monthKey);
     const now = Date.now();
-
     if (cached && now - cached.computedAt < UPSELL_MONTH_TTL_MS) {
       monthMap = cached.data;
     } else {
@@ -445,20 +332,25 @@ app.get("/api/upsell-sales", async (req, res) => {
       UPSELL_MONTH_CACHE.set(monthKey, { computedAt: now, data: monthMap });
     }
 
-    // --- Збираємо відповідь (тільки ті хто є в дні) ---
+    // Всі хто є в місяці + сьогодні
+    const allUsers = new Map([...monthMap, ...dayMap]);
     const result = [];
-    for (const [uid, dayData] of dayMap) {
+    for (const [uid, data] of allUsers) {
+      const dayData = dayMap.get(uid);
       const monthData = monthMap.get(uid);
+      const r = (v) => Math.round((v || 0) * 100) / 100;
       result.push({
         user_id: uid,
-        name: dayData.name,
-        day_sum: Math.round(dayData.sum * 100) / 100,
-        month_sum: monthData ? Math.round(monthData.sum * 100) / 100 : 0,
+        name: data.name,
+        day_sum: r(dayData?.sum),
+        day_sauces: r(dayData?.sauces),
+        day_kitchen: r(dayData?.kitchen),
+        day_bar: r(dayData?.bar),
+        month_sum: r(monthData?.sum),
       });
     }
 
     result.sort((a, b) => b.day_sum - a.day_sum);
-
     res.json({ dateFrom, dateTo, response: result });
   } catch (e) {
     console.error(e);
@@ -466,19 +358,14 @@ app.get("/api/upsell-sales", async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 3001;
-app.listen(port, () => console.log(`API server listening on ${port}`));
-
 // -------------------- UPSELL DETAIL ENDPOINT --------------------
 app.get("/api/upsell-detail", async (req, res) => {
   try {
-    if (!TOKEN)
-      return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
 
     const { format = "html" } = req.query;
     let { dateFrom, dateTo } = req.query;
 
-    // Якщо дати не передані — показуємо форму вибору
     if (!dateFrom && format === "html") {
       const today = todayYYYYMMDD();
       const todayInput = `${today.slice(0,4)}-${today.slice(4,6)}-${today.slice(6,8)}`;
@@ -492,8 +379,7 @@ app.get("/api/upsell-detail", async (req, res) => {
   input[type=date]{width:100%;padding:10px;background:#0f3460;border:1px solid #444;border-radius:6px;color:#fff;font-size:15px;box-sizing:border-box}
   .btns{display:flex;gap:10px;margin-top:24px}
   .btn{flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:bold;cursor:pointer}
-  .btn-html{background:#0f3460;color:#00d4ff}
-  .btn-csv{background:#27ae60;color:#fff}
+  .btn-html{background:#0f3460;color:#00d4ff}.btn-csv{background:#27ae60;color:#fff}
   .btn:hover{opacity:0.85}
   .presets{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
   .preset{padding:5px 10px;background:#0f3460;border:1px solid #444;border-radius:4px;color:#aaa;font-size:12px;cursor:pointer}
@@ -519,8 +405,7 @@ app.get("/api/upsell-detail", async (req, res) => {
 <script>
 function fmt(d){return d.toISOString().slice(0,10)}
 function setPreset(days){
-  const to=new Date();
-  const from=new Date();
+  const to=new Date(),from=new Date();
   if(days===1){to.setDate(to.getDate()-1);from.setDate(from.getDate()-1);}
   else if(days>1){from.setDate(from.getDate()-days);}
   document.getElementById('from').value=fmt(from);
@@ -533,7 +418,7 @@ function go(fmt){
   window.location.href='/api/upsell-detail?dateFrom='+from+'&dateTo='+to+'&format='+fmt;
 }
 </script></body></html>`;
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Content-Type","text/html; charset=utf-8");
       return res.send(html);
     }
 
@@ -541,10 +426,8 @@ function go(fmt){
     if (!dateTo) dateTo = dateFrom;
 
     await ensureProductBasePrices();
-
     const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
     const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
-
     const userDetails = new Map();
     const BATCH = 10;
 
@@ -555,11 +438,9 @@ function go(fmt){
         const name = String(tx.name || "");
         const txId = String(tx.transaction_id);
         const time = String(tx.date_close_date || "");
-
         try {
           const prodResp = await poster("dash.getTransactionProducts", { transaction_id: txId });
           const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
-
           const lines = [];
           let checkSauces = 0, checkKitchen = 0, checkBar = 0;
 
@@ -571,7 +452,6 @@ function go(fmt){
             const pid = Number(p.product_id);
             const productName = String(p.product_name || "");
             const modName = String(p.modificator_name || "");
-
             let amount = 0, type = null;
 
             if (catId === 17) {
@@ -618,9 +498,7 @@ function go(fmt){
 
     const round = v => Math.round((v||0)*100)/100;
     const sorted = [...userDetails.values()].sort((a,b) => b.totals.sum - a.totals.sum);
-    const backUrl = "/api/upsell-detail";
 
-    // ---- CSV ----
     if (format === "csv") {
       const rows = [["Офіціант","Чек №","Час","Позиція","К-сть","Тип","Сума (грн)"]];
       for (const u of sorted) {
@@ -630,7 +508,9 @@ function go(fmt){
           }
           rows.push([u.name, ch.transaction_id, ch.time, "--- ПІДСУМОК ЧЕКУ ---", "", "", String(ch.total).replace(".",",")]);
         }
-        rows.push([u.name,"","","=== ПІДСУМОК ОФІЦІАНТА ===","",`Соуси:${round(u.totals.sauces)} Кух:${round(u.totals.kitchen)} Бар:${round(u.totals.bar)}`, String(round(u.totals.sum)).replace(".",",")]);
+        rows.push([u.name,"","","=== ПІДСУМОК ОФІЦІАНТА ===","",
+          `Соуси:${round(u.totals.sauces)} Кух:${round(u.totals.kitchen)} Бар:${round(u.totals.bar)}`,
+          String(round(u.totals.sum)).replace(".",",")]);
         rows.push([]);
       }
       const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\n");
@@ -639,7 +519,6 @@ function go(fmt){
       return res.send("\uFEFF"+csv);
     }
 
-    // ---- HTML ----
     let html = `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
 <title>Деталі допів — ${dateFrom}</title>
 <style>
@@ -652,13 +531,12 @@ function go(fmt){
   .check-total{margin-top:8px;padding-top:6px;border-top:1px dashed #444;font-size:13px;color:#f9ca24}
   .user-total{background:#0f3460;padding:8px 15px;border-radius:4px;margin-top:5px;color:#f9ca24;font-weight:bold}
   .topbar{display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
-  .btn{padding:8px 16px;border-radius:6px;font-size:13px;text-decoration:none;font-weight:bold}
-  .btn-back{background:#444;color:#fff}
-  .btn-csv{background:#27ae60;color:#fff}
+  .btn{padding:8px 16px;border-radius:6px;font-size:13px;text-decoration:none;font-weight:bold;display:inline-block}
+  .btn-back{background:#444;color:#fff}.btn-csv{background:#27ae60;color:#fff}
 </style></head><body>
 <div class="topbar">
   <h1 style="margin:0">🔥 Деталі допів — ${dateFrom}${dateFrom!==dateTo?" → "+dateTo:""}</h1>
-  <a class="btn btn-back" href="${backUrl}">← Назад</a>
+  <a class="btn btn-back" href="/api/upsell-detail">← Назад</a>
   <a class="btn btn-csv" href="/api/upsell-detail?dateFrom=${dateFrom}&dateTo=${dateTo}&format=csv">⬇ Скачати CSV</a>
 </div>`;
 
@@ -688,3 +566,6 @@ function go(fmt){
     res.status(500).json({ error: "Server error", detail: String(e) });
   }
 });
+
+const port = process.env.PORT || 3001;
+app.listen(port, () => console.log(`API server listening on ${port}`));
