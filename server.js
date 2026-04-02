@@ -278,7 +278,7 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
             const info = PRODUCT_BASE_PRICE.get(pid);
             if (info != null && info.price > 0) {
               const delta = (payedSum / num / 100) - info.price;
-              if (delta > 0) {
+              if (delta >= 1) {
                 if (info.workshop === 1) { txBar += delta * num; }
                 else { txKitchen += delta * num; }
               }
@@ -464,7 +464,7 @@ function go(fmt){
               const info = PRODUCT_BASE_PRICE.get(pid);
               if (info && info.price > 0) {
                 const delta = (payedSum / num / 100) - info.price;
-                if (delta > 0) {
+                if (delta >= 1) {
                   amount = Math.round(delta * num * 100) / 100;
                   if (info.workshop === 1) { type = "Мод бар"; checkBar += amount; }
                   else { type = "Мод кухня"; checkKitchen += amount; }
