@@ -206,6 +206,10 @@ let PRODUCT_BASE_CACHE_AT = 0;
 const PRODUCT_BASE_TTL_MS = 30 * 60 * 1000;
 const SPOT_ID = 1;
 
+// -------------------- Ціни доставки (LOKO/Choice) --------------------
+// Для чеків service_mode=2/3 використовуємо ці ціни як базові для дельти
+const DELIVERY_PRICES = new Map([[8,69.0], [9,36.0], [12,65.0], [13,65.0], [14,69.0], [17,59.0], [27,79.0], [31,99.0], [37,139.0], [39,22.0], [40,239.0], [42,169.0], [44,36.0], [47,119.0], [49,119.0], [51,139.0], [53,179.0], [55,269.0], [57,79.0], [61,139.0], [63,139.0], [64,79.0], [66,139.0], [67,275.0], [68,79.0], [69,219.0], [71,329.0], [72,259.0], [73,65.0], [74,65.0], [75,69.0], [76,69.0], [81,19.0], [82,79.0], [92,495.0], [93,495.0], [96,750.0], [98,495.0], [99,495.0], [101,750.0], [106,495.0], [107,750.0], [114,109.0], [115,89.0], [116,145.0], [117,55.0], [122,119.0], [125,59.0], [129,69.0], [130,199.0], [131,119.0], [132,99.0], [133,159.0], [134,99.0], [135,89.0], [136,119.0], [137,99.0], [138,79.0], [139,129.0], [140,79.0], [141,79.0], [142,109.0], [143,35.0], [144,6.99], [145,13.0], [147,1.0], [149,1.0], [154,189.0], [163,89.0], [164,59.0], [166,95.0], [168,95.0], [170,125.0], [173,95.0], [174,135.0], [176,135.0], [177,125.0], [182,45.0], [183,59.0], [185,49.0], [186,179.0], [187,6.99], [189,43.0], [190,43.0], [191,43.0], [192,35.0], [193,43.0], [194,35.0], [195,45.0], [196,45.0], [197,59.0], [198,44.0], [199,109.0], [200,139.0], [201,119.0], [202,69.0], [203,109.0], [204,109.0], [206,159.0], [208,289.0], [209,289.0], [210,299.0], [211,209.0], [212,249.0], [214,179.0], [219,269.0], [221,22.0], [222,369.0], [224,79.0], [225,189.0], [226,199.0], [227,219.0], [228,219.0], [229,139.0], [230,79.0], [231,89.0], [233,109.0], [234,169.0], [243,52.0], [244,52.0], [247,13.0], [252,179.0], [254,12.0], [255,9.0], [256,199.0], [257,239.0], [258,750.0], [259,125.0], [262,159.0], [265,22.0], [273,199.0], [274,169.0], [275,199.0], [276,219.0], [277,23.0], [278,19.0], [279,19.0], [280,21.0], [281,23.0], [282,19.0], [283,29.0], [285,129.0], [288,159.0], [290,199.0], [293,9.0], [295,289.0], [296,1550.0], [297,22.0], [299,9.99], [300,79.0], [301,59.0], [302,59.0], [303,59.0], [304,59.0], [305,99.0], [306,99.0], [307,69.0], [308,19.0], [309,495.0], [310,95.0], [311,59.0], [312,59.0], [313,18.0], [314,24.0], [315,23.0], [316,60.0], [317,49.0], [320,59.0], [321,59.0], [325,199.0], [327,59.0], [330,43.0], [331,159.0], [332,99.0], [335,495.0], [336,69.0], [337,69.0], [338,69.0], [339,69.0], [340,69.0], [345,69.0], [346,69.0], [347,69.0], [349,69.0], [351,233.0], [353,95.0], [355,69.0], [356,750.0], [357,125.0], [360,299.0], [363,139.0], [365,69.0], [366,599.0], [367,95.0], [368,750.0], [369,135.0], [370,569.0], [371,50.0], [375,69.0], [379,5.0], [384,189.0], [387,199.0], [391,49.0], [395,89.0], [397,129.0], [399,189.0], [401,149.0], [402,99.0], [403,169.0], [404,169.0], [405,199.0], [406,69.0], [407,19.0], [408,19.0], [409,19.0], [410,19.0], [411,19.0], [412,19.0], [413,43.0], [414,109.0], [415,135.0], [416,750.0], [418,109.0], [421,19.0], [422,69.0], [423,79.0], [424,55.0], [425,79.0], [429,36.0], [438,199.0], [440,159.0], [441,60.0], [443,20.0], [444,189.0], [446,16.0], [447,13.0], [448,9.0], [451,149.0], [452,89.0], [453,29.0], [454,19.0], [455,36.0], [456,69.0], [457,59.0], [458,40.0], [468,45.0], [469,45.0], [473,2.49], [475,39.0], [476,499.0], [477,750.0], [478,135.0], [480,599.0], [481,149.0], [482,119.0], [483,59.0], [485,89.0], [487,279.0], [493,199.0], [494,169.0], [495,199.0], [497,189.0], [498,69.0], [502,65.0], [503,109.0], [504,199.0], [505,109.0], [506,109.0], [507,199.0], [508,219.0], [510,199.0], [515,369.0], [517,16.0], [518,14.0], [519,129.0], [520,369.0], [521,189.0], [523,19.0], [526,199.0], [528,259.0], [529,10.0], [530,12.0], [531,12.0], [532,10.0], [533,6.99], [534,12.0], [535,10.0], [536,10.0], [537,5.0], [540,109.0], [541,7.0], [542,19.0], [545,299.0], [548,199.0], [550,26.0], [551,329.0], [554,75.0], [558,79.0], [560,59.0], [565,22.0], [569,229.0], [570,79.0], [571,289.0], [573,209.0], [576,69.0], [577,49.0], [578,1.99], [589,199.0], [596,750.0], [597,149.0], [598,139.0], [599,229.0], [600,129.0], [601,149.0], [602,299.0], [603,149.0], [604,495.0], [605,149.0], [616,199.0], [620,199.0], [622,189.0], [623,1.0], [624,20.0], [627,299.0], [631,229.0], [632,199.0], [634,95.0], [636,39.0], [637,139.0], [638,22.0], [643,109.0], [646,289.0], [648,289.0], [650,299.0], [652,289.0], [654,289.0], [656,109.0], [657,289.0], [659,289.0], [660,289.0], [661,289.0], [662,289.0], [663,299.0], [664,289.0], [665,109.0], [666,369.0], [667,495.0], [668,135.0], [669,450.0], [670,599.0], [671,495.0], [672,135.0], [673,229.0], [674,135.0]]);
+
 async function ensureProductBasePrices() {
   const now = Date.now();
   if (PRODUCT_BASE_PRICE.size && now - PRODUCT_BASE_CACHE_AT < PRODUCT_BASE_TTL_MS) return;
@@ -255,6 +259,7 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
       const uid = String(tx.user_id);
       const name = String(tx.name || "");
       const txId = String(tx.transaction_id);
+      const isDelivery = Number(tx.service_mode) === 2 || Number(tx.service_mode) === 3;
       try {
         const prodResp = await poster("dash.getTransactionProducts", { transaction_id: txId });
         const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
@@ -277,7 +282,10 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
           } else if (modId !== "0") {
             const info = PRODUCT_BASE_PRICE.get(pid);
             if (info != null && info.price > 0) {
-              const delta = (payedSum / num / 100) - info.price;
+              const basePrice = isDelivery && DELIVERY_PRICES.has(pid)
+                ? DELIVERY_PRICES.get(pid)
+                : info.price;
+              const delta = (payedSum / num / 100) - basePrice;
               if (delta >= 1) {
                 if (info.workshop === 1) { txBar += delta * num; }
                 else { txKitchen += delta * num; }
@@ -438,6 +446,7 @@ function go(fmt){
         const name = String(tx.name || "");
         const txId = String(tx.transaction_id);
         const time = String(tx.date_close_date || "");
+        const isDelivery = Number(tx.service_mode) === 2 || Number(tx.service_mode) === 3;
         try {
           const prodResp = await poster("dash.getTransactionProducts", { transaction_id: txId });
           const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
@@ -463,7 +472,10 @@ function go(fmt){
             } else if (modId !== "0") {
               const info = PRODUCT_BASE_PRICE.get(pid);
               if (info && info.price > 0) {
-                const delta = (payedSum / num / 100) - info.price;
+                const basePrice = isDelivery && DELIVERY_PRICES.has(pid)
+                  ? DELIVERY_PRICES.get(pid)
+                  : info.price;
+                const delta = (payedSum / num / 100) - basePrice;
                 if (delta >= 1) {
                   amount = Math.round(delta * num * 100) / 100;
                   if (info.workshop === 1) { type = "Мод бар"; checkBar += amount; }
@@ -500,19 +512,72 @@ function go(fmt){
     const sorted = [...userDetails.values()].sort((a,b) => b.totals.sum - a.totals.sum);
 
     if (format === "csv") {
-      const rows = [["Офіціант","Чек №","Час","Позиція","К-сть","Тип","Сума (грн)"]];
+      // Заголовок
+      const rows = [[
+        "Офіціант",
+        "Чек №",
+        "Дата і час",
+        "Позиція",
+        "К-сть",
+        "Категорія",
+        "Соуси (грн)",
+        "Допи кухня (грн)",
+        "Допи бар (грн)",
+        "Сума позиції (грн)",
+        "Підсумок чеку (грн)",
+      ]];
+
       for (const u of sorted) {
+        let firstCheckRow = true;
         for (const ch of u.checks.sort((a,b)=>a.time.localeCompare(b.time))) {
+          let firstLineRow = true;
           for (const line of ch.lines) {
-            rows.push([u.name, ch.transaction_id, ch.time, line.product, line.qty, line.type, String(line.amount).replace(".",",")]);
+            const isSauce = line.type === "Соус";
+            const isKitchen = line.type === "Доп кухня" || line.type === "Мод кухня";
+            const isBar = line.type === "Доп бар" || line.type === "Мод бар";
+            rows.push([
+              firstLineRow ? u.name : "",           // Офіціант — тільки в першому рядку позиції
+              firstLineRow ? ch.transaction_id : "", // Чек № — тільки в першому рядку
+              firstLineRow ? ch.time : "",           // Час — тільки в першому рядку
+              line.product,
+              line.qty,
+              line.type,
+              isSauce ? String(line.amount).replace(".",",") : "",
+              isKitchen ? String(line.amount).replace(".",",") : "",
+              isBar ? String(line.amount).replace(".",",") : "",
+              String(line.amount).replace(".",","),
+              "",
+            ]);
+            firstLineRow = false;
           }
-          rows.push([u.name, ch.transaction_id, ch.time, "--- ПІДСУМОК ЧЕКУ ---", "", "", String(ch.total).replace(".",",")]);
+          // Підсумок чеку — окремий рядок з підсвіткою
+          rows.push([
+            "", "", "",
+            "ПІДСУМОК ЧЕКУ",
+            "", "",
+            ch.sauces ? String(ch.sauces).replace(".",",") : "",
+            ch.kitchen ? String(ch.kitchen).replace(".",",") : "",
+            ch.bar ? String(ch.bar).replace(".",",") : "",
+            "",
+            String(ch.total).replace(".",","),
+          ]);
+          rows.push([]); // порожній рядок між чеками
+          firstCheckRow = false;
         }
-        rows.push([u.name,"","","=== ПІДСУМОК ОФІЦІАНТА ===","",
-          `Соуси:${round(u.totals.sauces)} Кух:${round(u.totals.kitchen)} Бар:${round(u.totals.bar)}`,
-          String(round(u.totals.sum)).replace(".",",")]);
+        // Підсумок офіціанта
+        rows.push([
+          u.name,
+          "ПІДСУМОК ОФІЦІАНТА", "", "", "", "",
+          String(round(u.totals.sauces)).replace(".",","),
+          String(round(u.totals.kitchen)).replace(".",","),
+          String(round(u.totals.bar)).replace(".",","),
+          "",
+          String(round(u.totals.sum)).replace(".",","),
+        ]);
+        rows.push([]); // порожній рядок між офіціантами
         rows.push([]);
       }
+
       const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\n");
       res.setHeader("Content-Type","text/csv; charset=utf-8");
       res.setHeader("Content-Disposition",`attachment; filename="upsell_${dateFrom}_${dateTo}.csv"`);
