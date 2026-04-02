@@ -240,6 +240,46 @@ async function ensureProductBasePrices() {
   }
 }
 
+// -------------------- КЕШ: ціни модифікаторів --------------------
+// modification_id -> { price, workshop }
+let MOD_PRICES = new Map();
+let MOD_PRICES_CACHE_AT = 0;
+const MOD_PRICES_TTL_MS = 30 * 60 * 1000;
+
+async function ensureModPrices() {
+  const now = Date.now();
+  if (MOD_PRICES.size && now - MOD_PRICES_CACHE_AT < MOD_PRICES_TTL_MS) return;
+
+  try {
+    const j = await poster("menu.getProducts");
+    const arr = Array.isArray(j?.response) ? j.response : [];
+    const map = new Map();
+
+    for (const p of arr) {
+      const workshop = Number(p.workshop || 0);
+      if (!Array.isArray(p.group_modifications)) continue;
+      for (const group of p.group_modifications) {
+        if (!Array.isArray(group.modifications)) continue;
+        for (const mod of group.modifications) {
+          const modId = Number(mod.dish_modification_id);
+          const price = Number(mod.price || 0);
+          if (modId && price > 0 && !map.has(modId)) {
+            map.set(modId, { price, workshop });
+          }
+        }
+      }
+    }
+
+    if (map.size) {
+      MOD_PRICES = map;
+      MOD_PRICES_CACHE_AT = now;
+      console.log(`MOD_PRICES loaded: ${map.size} modifications`);
+    }
+  } catch (e) {
+    console.error("ensureModPrices error:", e);
+  }
+}
+
 // -------------------- КЕШ: місячні upsell --------------------
 const UPSELL_MONTH_CACHE = new Map();
 const UPSELL_MONTH_TTL_MS = 30 * 60 * 1000;
@@ -249,6 +289,7 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
   const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
   const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
   await ensureProductBasePrices();
+  await ensureModPrices();
 
   const userSums = new Map(); // uid -> { name, sauces, kitchen, bar, sum }
 
@@ -280,16 +321,12 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
           } else if (catId === 41) {
             txBar += payedSum / 100;
           } else if (modId !== "0") {
-            const info = PRODUCT_BASE_PRICE.get(pid);
-            if (info != null && info.price > 0) {
-              const basePrice = isDelivery && DELIVERY_PRICES.has(pid)
-                ? DELIVERY_PRICES.get(pid)
-                : info.price;
-              const delta = (payedSum / num / 100) - basePrice;
-              if (delta >= 4) {
-                if (info.workshop === 1) { txBar += delta * num; }
-                else { txKitchen += delta * num; }
-              }
+            // Беремо ціну модифікатора напряму з кешу — не залежить від ціни страви
+            const modInfo = MOD_PRICES.get(Number(modId));
+            if (modInfo && modInfo.price > 0) {
+              const amount = modInfo.price * num;
+              if (modInfo.workshop === 1) { txBar += amount; }
+              else { txKitchen += amount; }
             }
           }
         }
@@ -434,6 +471,7 @@ function go(fmt){
     if (!dateTo) dateTo = dateFrom;
 
     await ensureProductBasePrices();
+    await ensureModPrices();
     const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
     const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
     const userDetails = new Map();
@@ -470,17 +508,11 @@ function go(fmt){
             } else if (catId === 41) {
               amount = payedSum / 100; type = "Доп бар"; checkBar += amount;
             } else if (modId !== "0") {
-              const info = PRODUCT_BASE_PRICE.get(pid);
-              if (info && info.price > 0) {
-                const basePrice = isDelivery && DELIVERY_PRICES.has(pid)
-                  ? DELIVERY_PRICES.get(pid)
-                  : info.price;
-                const delta = (payedSum / num / 100) - basePrice;
-                if (delta >= 4) {
-                  amount = Math.round(delta * num * 100) / 100;
-                  if (info.workshop === 1) { type = "Мод бар"; checkBar += amount; }
-                  else { type = "Мод кухня"; checkKitchen += amount; }
-                }
+              const modInfo = MOD_PRICES.get(Number(modId));
+              if (modInfo && modInfo.price > 0) {
+                amount = modInfo.price * num;
+                if (modInfo.workshop === 1) { type = "Мод бар"; checkBar += amount; }
+                else { type = "Мод кухня"; checkKitchen += amount; }
               }
             }
 
