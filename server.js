@@ -409,19 +409,22 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
             const rawMod = String(p.modificator_name || "");
             // Спочатку точний збіг повної назви, потім розбиваємо по "+"
             const { name: rawModName, qty: rawModQty } = parseModPart(rawMod);
+            // Якщо × N не вбудовано в назву — беремо num (кількість страв)
+            const effectiveQty = rawModQty > 1 ? rawModQty : num;
             const fullNorm = normalizeName(rawModName);
             const fullExact = MOD_PRICES.get(fullNorm);
             if (fullExact && fullExact.price > 0) {
-              const amount = fullExact.price * rawModQty;
+              const amount = fullExact.price * effectiveQty;
               if (fullExact.workshop === 1) { txBar += amount; }
               else { txKitchen += amount; }
             } else {
               const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
               for (const part of parts) {
                 const { name: partName, qty: modQty } = parseModPart(part);
+                const partQty = modQty > 1 ? modQty : num;
                 const modInfo = findModByName(partName, MOD_PRICES);
                 if (modInfo && modInfo.price > 0) {
-                  const amount = modInfo.price * modQty;
+                  const amount = modInfo.price * partQty;
                   if (modInfo.workshop === 1) { txBar += amount; }
                   else { txKitchen += amount; }
                 }
@@ -612,31 +615,33 @@ function go(fmt){
               const rawMod = String(p.modificator_name || "");
               // Спочатку точний збіг повної назви, потім розбиваємо по "+"
               const { name: rawModName, qty: rawModQty } = parseModPart(rawMod);
+              const effectiveQty = rawModQty > 1 ? rawModQty : num;
               const fullNorm = normalizeName(rawModName);
               const fullExact = MOD_PRICES.get(fullNorm);
               if (fullExact && fullExact.price > 0) {
-                const a = Math.round(fullExact.price * rawModQty * 100) / 100;
+                const a = Math.round(fullExact.price * effectiveQty * 100) / 100;
                 if (fullExact.workshop === 1) {
                   checkBar += a;
-                  lines.push({ product: fullNorm, qty: rawModQty, amount: a, type: "Мод бар" });
+                  lines.push({ product: fullNorm, qty: effectiveQty, amount: a, type: "Мод бар" });
                 } else {
                   checkKitchen += a;
-                  lines.push({ product: fullNorm, qty: rawModQty, amount: a, type: "Мод кухня" });
+                  lines.push({ product: fullNorm, qty: effectiveQty, amount: a, type: "Мод кухня" });
                 }
               } else {
                 const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
                 for (const part of parts) {
                   const { name: partName, qty: modQty } = parseModPart(part);
+                  const partQty = modQty > 1 ? modQty : num;
                   const modInfo = findModByName(partName, MOD_PRICES);
                   if (modInfo && modInfo.price > 0) {
-                    const a = Math.round(modInfo.price * modQty * 100) / 100;
+                    const a = Math.round(modInfo.price * partQty * 100) / 100;
                     const label = normalizeName(partName);
                     if (modInfo.workshop === 1) {
                       checkBar += a;
-                      lines.push({ product: label, qty: modQty, amount: a, type: "Мод бар" });
+                      lines.push({ product: label, qty: partQty, amount: a, type: "Мод бар" });
                     } else {
                       checkKitchen += a;
-                      lines.push({ product: label, qty: modQty, amount: a, type: "Мод кухня" });
+                      lines.push({ product: label, qty: partQty, amount: a, type: "Мод кухня" });
                     }
                   }
                 }
