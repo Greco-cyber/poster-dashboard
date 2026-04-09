@@ -250,6 +250,49 @@ function normalizeName(s) {
   return String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+// Ключові слова для нечіткого пошуку (без цифр і одиниць виміру)
+function keyWords(s) {
+  return new Set(
+    String(s || "").toLowerCase()
+      .replace(/\d+/g, "")
+      .replace(/\b(г|мл|кг|шт|л)\b/g, "")
+      .split(/[\s,+.]+/)
+      .filter(w => w.length > 2)
+  );
+}
+
+// Шукаємо доп по назві: спочатку точний збіг, потім по ключових словах
+function findModByName(rawPart, modPricesMap) {
+  const norm = normalizeName(rawPart);
+  // 1. Точний збіг
+  if (modPricesMap.has(norm)) return modPricesMap.get(norm);
+  // 2. Пошук по ключових словах
+  const kw = keyWords(rawPart);
+  if (kw.size === 0) return null;
+  let best = null, bestScore = 0;
+  for (const [name, info] of modPricesMap) {
+    const kwName = keyWords(name);
+    const overlap = [...kw].filter(w => kwName.has(w)).length;
+    const score = overlap / Math.max(kw.size, kwName.size);
+    if (overlap >= 1 && score > bestScore) {
+      bestScore = score;
+      best = info;
+    }
+  }
+  return best;
+}
+
+// Скорочена назва — без цифр, одиниць виміру, розділових знаків
+// "Філе курки, 60 г" → "філе курки"
+function shortName(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[+,]/g, " ")           // прибираємо + і ,
+    .replace(/\d+\s*(г|мл|кг|л|шт)?/g, "") // прибираємо числа з одиницями
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function ensureModPrices() {
   const now = Date.now();
   if (MOD_PRICES.size && now - MOD_PRICES_CACHE_AT < MOD_PRICES_TTL_MS) return;
@@ -279,6 +322,11 @@ async function ensureModPrices() {
 
       if (name && price !== null && price > 0) {
         map.set(name, { price, workshop });
+        // Також зберігаємо по скороченій назві (без цифр і одиниць)
+        const sName = shortName(p.product_name);
+        if (sName && sName !== name && !map.has(sName)) {
+          map.set(sName, { price, workshop });
+        }
       }
     }
 
@@ -333,11 +381,13 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
           } else if (catId === 41) {
             txBar += payedSum / 100;
           } else if (modId !== "0") {
-            // Розбиваємо modificator_name по "," — кожен шматок окремий доп
+            // Розбиваємо по "," — кожен шматок окремий доп
             const rawMod = String(p.modificator_name || "");
-            const parts = rawMod.split(",").map(s => normalizeName(s)).filter(Boolean);
+            const parts = rawMod.split(",").map(s => s.trim()).filter(Boolean);
             for (const part of parts) {
-              const modInfo = MOD_PRICES.get(part);
+              const fullKey = normalizeName(part);
+              const shortKey = shortName(part);
+              const modInfo = MOD_PRICES.get(fullKey) || MOD_PRICES.get(shortKey);
               if (modInfo && modInfo.price > 0) {
                 const amount = modInfo.price * num;
                 if (modInfo.workshop === 1) { txBar += amount; }
@@ -524,19 +574,19 @@ function go(fmt){
             } else if (catId === 41) {
               amount = payedSum / 100; type = "Доп бар"; checkBar += amount;
             } else if (modId !== "0") {
-              // Розбиваємо по "," — кожен шматок окремий доп
               const rawMod = String(p.modificator_name || "");
-              const parts = rawMod.split(",").map(s => normalizeName(s)).filter(Boolean);
+              const parts = rawMod.split(",").filter(s => s.trim().length > 1);
               for (const part of parts) {
-                const modInfo = MOD_PRICES.get(part);
+                const modInfo = findModByName(part, MOD_PRICES);
                 if (modInfo && modInfo.price > 0) {
                   const a = Math.round(modInfo.price * num * 100) / 100;
+                  const label = normalizeName(part);
                   if (modInfo.workshop === 1) {
                     checkBar += a;
-                    lines.push({ product: part, qty: num, amount: a, type: "Мод бар" });
+                    lines.push({ product: label, qty: num, amount: a, type: "Мод бар" });
                   } else {
                     checkKitchen += a;
-                    lines.push({ product: part, qty: num, amount: a, type: "Мод кухня" });
+                    lines.push({ product: label, qty: num, amount: a, type: "Мод кухня" });
                   }
                 }
               }
