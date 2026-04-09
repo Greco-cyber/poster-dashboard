@@ -384,7 +384,8 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
             // Якщо payed_sum має копійки — акційний доп (0.01 грн), пропускаємо
             if (payedSum % 100 !== 0) continue;
             const rawMod = String(p.modificator_name || "");
-            const parts = rawMod.split(",").filter(s => s.trim().length > 4);
+            // Розбиваємо по "+" — кожен доп починається з "+"
+            const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
             for (const part of parts) {
               const modInfo = findModByName(part, MOD_PRICES);
               if (modInfo && modInfo.price > 0) {
@@ -576,7 +577,8 @@ function go(fmt){
               // Якщо payed_sum має копійки — акційний доп (0.01 грн), пропускаємо
               if (payedSum % 100 !== 0) continue;
               const rawMod = String(p.modificator_name || "");
-              const parts = rawMod.split(",").filter(s => s.trim().length > 4);
+              // Розбиваємо по "+" — кожен доп починається з "+"
+              const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
               for (const part of parts) {
                 const modInfo = findModByName(part, MOD_PRICES);
                 if (modInfo && modInfo.price > 0) {
