@@ -333,13 +333,16 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
           } else if (catId === 41) {
             txBar += payedSum / 100;
           } else if (modId !== "0") {
-            // Шукаємо доп по назві модифікатора
-            const modName = normalizeName(p.modificator_name);
-            const modInfo = modName ? MOD_PRICES.get(modName) : null;
-            if (modInfo && modInfo.price > 0) {
-              const amount = modInfo.price * num;
-              if (modInfo.workshop === 1) { txBar += amount; }
-              else { txKitchen += amount; }
+            // Розбиваємо modificator_name по "," — кожен шматок окремий доп
+            const rawMod = String(p.modificator_name || "");
+            const parts = rawMod.split(",").map(s => normalizeName(s)).filter(Boolean);
+            for (const part of parts) {
+              const modInfo = MOD_PRICES.get(part);
+              if (modInfo && modInfo.price > 0) {
+                const amount = modInfo.price * num;
+                if (modInfo.workshop === 1) { txBar += amount; }
+                else { txKitchen += amount; }
+              }
             }
           }
         }
@@ -521,12 +524,21 @@ function go(fmt){
             } else if (catId === 41) {
               amount = payedSum / 100; type = "Доп бар"; checkBar += amount;
             } else if (modId !== "0") {
-              const modName = normalizeName(p.modificator_name);
-              const modInfo = modName ? MOD_PRICES.get(modName) : null;
-              if (modInfo && modInfo.price > 0) {
-                amount = modInfo.price * num;
-                if (modInfo.workshop === 1) { type = "Мод бар"; checkBar += amount; }
-                else { type = "Мод кухня"; checkKitchen += amount; }
+              // Розбиваємо по "," — кожен шматок окремий доп
+              const rawMod = String(p.modificator_name || "");
+              const parts = rawMod.split(",").map(s => normalizeName(s)).filter(Boolean);
+              for (const part of parts) {
+                const modInfo = MOD_PRICES.get(part);
+                if (modInfo && modInfo.price > 0) {
+                  const a = Math.round(modInfo.price * num * 100) / 100;
+                  if (modInfo.workshop === 1) {
+                    checkBar += a;
+                    lines.push({ product: part, qty: num, amount: a, type: "Мод бар" });
+                  } else {
+                    checkKitchen += a;
+                    lines.push({ product: part, qty: num, amount: a, type: "Мод кухня" });
+                  }
+                }
               }
             }
 
