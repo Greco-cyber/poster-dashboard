@@ -377,8 +377,10 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
   const userSums = new Map(); // uid -> { name, sauces, kitchen, bar, sum }
 
   const BATCH = 10;
-  for (let i = 0; i < transactions.length; i += BATCH) {
-    const batch = transactions.slice(i, i + BATCH);
+  // Тільки закриті чеки (status=2) з ненульовою оплатою
+  const closedTx = transactions.filter(tx => tx.status === "2" && Number(tx.payed_sum) > 0);
+  for (let i = 0; i < closedTx.length; i += BATCH) {
+    const batch = closedTx.slice(i, i + BATCH);
     await Promise.all(batch.map(async (tx) => {
       const uid = String(tx.user_id);
       const name = String(tx.name || "");
@@ -578,9 +580,11 @@ function go(fmt){
     const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
     const userDetails = new Map();
     const BATCH = 10;
+    // Тільки закриті чеки з ненульовою оплатою
+    const closedTx = transactions.filter(tx => tx.status === "2" && Number(tx.payed_sum) > 0);
 
-    for (let i = 0; i < transactions.length; i += BATCH) {
-      const batch = transactions.slice(i, i + BATCH);
+    for (let i = 0; i < closedTx.length; i += BATCH) {
+      const batch = closedTx.slice(i, i + BATCH);
       await Promise.all(batch.map(async (tx) => {
         const uid = String(tx.user_id);
         const name = String(tx.name || "");
