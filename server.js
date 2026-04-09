@@ -381,13 +381,12 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
           } else if (catId === 41) {
             txBar += payedSum / 100;
           } else if (modId !== "0") {
-            // Розбиваємо по "," — кожен шматок окремий доп
+            // Якщо payed_sum має копійки — акційний доп (0.01 грн), пропускаємо
+            if (payedSum % 100 !== 0) continue;
             const rawMod = String(p.modificator_name || "");
-            const parts = rawMod.split(",").map(s => s.trim()).filter(Boolean);
+            const parts = rawMod.split(",").filter(s => s.trim().length > 1);
             for (const part of parts) {
-              const fullKey = normalizeName(part);
-              const shortKey = shortName(part);
-              const modInfo = MOD_PRICES.get(fullKey) || MOD_PRICES.get(shortKey);
+              const modInfo = findModByName(part, MOD_PRICES);
               if (modInfo && modInfo.price > 0) {
                 const amount = modInfo.price * num;
                 if (modInfo.workshop === 1) { txBar += amount; }
@@ -574,6 +573,8 @@ function go(fmt){
             } else if (catId === 41) {
               amount = payedSum / 100; type = "Доп бар"; checkBar += amount;
             } else if (modId !== "0") {
+              // Якщо payed_sum має копійки — акційний доп (0.01 грн), пропускаємо
+              if (payedSum % 100 !== 0) continue;
               const rawMod = String(p.modificator_name || "");
               const parts = rawMod.split(",").filter(s => s.trim().length > 1);
               for (const part of parts) {
