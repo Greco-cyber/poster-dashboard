@@ -321,11 +321,13 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
           } else if (catId === 41) {
             txBar += payedSum / 100;
           } else if (modId !== "0") {
-            // Беремо ціну модифікатора напряму з кешу — не залежить від ціни страви
+            // Ціна з кешу модифікатора, workshop — від товару в чеку
             const modInfo = MOD_PRICES.get(Number(modId));
+            const productInfo = PRODUCT_BASE_PRICE.get(pid);
             if (modInfo && modInfo.price > 0) {
               const amount = modInfo.price * num;
-              if (modInfo.workshop === 1) { txBar += amount; }
+              const workshop = productInfo ? productInfo.workshop : modInfo.workshop;
+              if (workshop === 1) { txBar += amount; }
               else { txKitchen += amount; }
             }
           }
@@ -509,9 +511,11 @@ function go(fmt){
               amount = payedSum / 100; type = "Доп бар"; checkBar += amount;
             } else if (modId !== "0") {
               const modInfo = MOD_PRICES.get(Number(modId));
+              const productInfo = PRODUCT_BASE_PRICE.get(pid);
               if (modInfo && modInfo.price > 0) {
                 amount = modInfo.price * num;
-                if (modInfo.workshop === 1) { type = "Мод бар"; checkBar += amount; }
+                const workshop = productInfo ? productInfo.workshop : modInfo.workshop;
+                if (workshop === 1) { type = "Мод бар"; checkBar += amount; }
                 else { type = "Мод кухня"; checkKitchen += amount; }
               }
             }
