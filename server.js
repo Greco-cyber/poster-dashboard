@@ -384,14 +384,21 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
             // Якщо payed_sum має копійки — акційний доп (0.01 грн), пропускаємо
             if (payedSum % 100 !== 0) continue;
             const rawMod = String(p.modificator_name || "");
-            // Розбиваємо по "+" — кожен доп починається з "+"
-            const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
-            for (const part of parts) {
-              const modInfo = findModByName(part, MOD_PRICES);
-              if (modInfo && modInfo.price > 0) {
-                const amount = modInfo.price * num;
-                if (modInfo.workshop === 1) { txBar += amount; }
-                else { txKitchen += amount; }
+            // Спочатку повна назва, потім розбиваємо по "+"
+            const fullInfo = findModByName(rawMod, MOD_PRICES);
+            if (fullInfo && fullInfo.price > 0) {
+              const amount = fullInfo.price * num;
+              if (fullInfo.workshop === 1) { txBar += amount; }
+              else { txKitchen += amount; }
+            } else {
+              const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
+              for (const part of parts) {
+                const modInfo = findModByName(part, MOD_PRICES);
+                if (modInfo && modInfo.price > 0) {
+                  const amount = modInfo.price * num;
+                  if (modInfo.workshop === 1) { txBar += amount; }
+                  else { txKitchen += amount; }
+                }
               }
             }
           }
@@ -577,19 +584,32 @@ function go(fmt){
               // Якщо payed_sum має копійки — акційний доп (0.01 грн), пропускаємо
               if (payedSum % 100 !== 0) continue;
               const rawMod = String(p.modificator_name || "");
-              // Розбиваємо по "+" — кожен доп починається з "+"
-              const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
-              for (const part of parts) {
-                const modInfo = findModByName(part, MOD_PRICES);
-                if (modInfo && modInfo.price > 0) {
-                  const a = Math.round(modInfo.price * num * 100) / 100;
-                  const label = normalizeName(part);
-                  if (modInfo.workshop === 1) {
-                    checkBar += a;
-                    lines.push({ product: label, qty: num, amount: a, type: "Мод бар" });
-                  } else {
-                    checkKitchen += a;
-                    lines.push({ product: label, qty: num, amount: a, type: "Мод кухня" });
+              // Спочатку повна назва, потім розбиваємо по "+"
+              const fullInfo = findModByName(rawMod, MOD_PRICES);
+              if (fullInfo && fullInfo.price > 0) {
+                const a = Math.round(fullInfo.price * num * 100) / 100;
+                const label = normalizeName(rawMod);
+                if (fullInfo.workshop === 1) {
+                  checkBar += a;
+                  lines.push({ product: label, qty: num, amount: a, type: "Мод бар" });
+                } else {
+                  checkKitchen += a;
+                  lines.push({ product: label, qty: num, amount: a, type: "Мод кухня" });
+                }
+              } else {
+                const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
+                for (const part of parts) {
+                  const modInfo = findModByName(part, MOD_PRICES);
+                  if (modInfo && modInfo.price > 0) {
+                    const a = Math.round(modInfo.price * num * 100) / 100;
+                    const label = normalizeName(part);
+                    if (modInfo.workshop === 1) {
+                      checkBar += a;
+                      lines.push({ product: label, qty: num, amount: a, type: "Мод бар" });
+                    } else {
+                      checkKitchen += a;
+                      lines.push({ product: label, qty: num, amount: a, type: "Мод кухня" });
+                    }
                   }
                 }
               }
