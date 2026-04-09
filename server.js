@@ -258,7 +258,19 @@ function latinToCyrillic(s) {
 }
 
 function normalizeName(s) {
-  return latinToCyrillic(String(s || "")).toLowerCase().replace(/\s+/g, " ").trim();
+  return latinToCyrillic(String(s || ""))
+    .replace(/\s*(?:[×xX\*]|&times;?)\s*\d+\s*$/, "") // прибираємо × 3 з кінця
+    .toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+// Парсимо назву модифікатора і кількість з рядка типу "Хліб білий × 3"
+function parseModPart(part) {
+  // Шукаємо × або x або * або &times або &times; перед числом в кінці
+  const match = part.match(/^(.+?)\s*(?:[×xX\*]|&times;?)\s*(\d+)\s*$/);
+  if (match) {
+    return { name: match[1].trim(), qty: Number(match[2]) };
+  }
+  return { name: part.trim(), qty: 1 };
 }
 
 // Ключові слова для нечіткого пошуку (без цифр і одиниць виміру)
@@ -396,20 +408,20 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
             if (payedSum % 100 !== 0) continue;
             const rawMod = String(p.modificator_name || "");
             // Спочатку точний збіг повної назви, потім розбиваємо по "+"
-            const fullNorm = normalizeName(rawMod);
+            const { name: rawModName, qty: rawModQty } = parseModPart(rawMod);
+            const fullNorm = normalizeName(rawModName);
             const fullExact = MOD_PRICES.get(fullNorm);
             if (fullExact && fullExact.price > 0) {
-              // Точний збіг — один доп
-              const amount = fullExact.price * num;
+              const amount = fullExact.price * rawModQty;
               if (fullExact.workshop === 1) { txBar += amount; }
               else { txKitchen += amount; }
             } else {
-              // Розбиваємо по "+" — кожна частина окремий доп
               const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
               for (const part of parts) {
-                const modInfo = findModByName(part, MOD_PRICES);
+                const { name: partName, qty: modQty } = parseModPart(part);
+                const modInfo = findModByName(partName, MOD_PRICES);
                 if (modInfo && modInfo.price > 0) {
-                  const amount = modInfo.price * num;
+                  const amount = modInfo.price * modQty;
                   if (modInfo.workshop === 1) { txBar += amount; }
                   else { txKitchen += amount; }
                 }
@@ -599,31 +611,32 @@ function go(fmt){
               if (payedSum % 100 !== 0) continue;
               const rawMod = String(p.modificator_name || "");
               // Спочатку точний збіг повної назви, потім розбиваємо по "+"
-              const fullNorm = normalizeName(rawMod);
+              const { name: rawModName, qty: rawModQty } = parseModPart(rawMod);
+              const fullNorm = normalizeName(rawModName);
               const fullExact = MOD_PRICES.get(fullNorm);
               if (fullExact && fullExact.price > 0) {
-                const a = Math.round(fullExact.price * num * 100) / 100;
-                const label = fullNorm;
+                const a = Math.round(fullExact.price * rawModQty * 100) / 100;
                 if (fullExact.workshop === 1) {
                   checkBar += a;
-                  lines.push({ product: label, qty: num, amount: a, type: "Мод бар" });
+                  lines.push({ product: fullNorm, qty: rawModQty, amount: a, type: "Мод бар" });
                 } else {
                   checkKitchen += a;
-                  lines.push({ product: label, qty: num, amount: a, type: "Мод кухня" });
+                  lines.push({ product: fullNorm, qty: rawModQty, amount: a, type: "Мод кухня" });
                 }
               } else {
                 const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
                 for (const part of parts) {
-                  const modInfo = findModByName(part, MOD_PRICES);
+                  const { name: partName, qty: modQty } = parseModPart(part);
+                  const modInfo = findModByName(partName, MOD_PRICES);
                   if (modInfo && modInfo.price > 0) {
-                    const a = Math.round(modInfo.price * num * 100) / 100;
-                    const label = normalizeName(part);
+                    const a = Math.round(modInfo.price * modQty * 100) / 100;
+                    const label = normalizeName(partName);
                     if (modInfo.workshop === 1) {
                       checkBar += a;
-                      lines.push({ product: label, qty: num, amount: a, type: "Мод бар" });
+                      lines.push({ product: label, qty: modQty, amount: a, type: "Мод бар" });
                     } else {
                       checkKitchen += a;
-                      lines.push({ product: label, qty: num, amount: a, type: "Мод кухня" });
+                      lines.push({ product: label, qty: modQty, amount: a, type: "Мод кухня" });
                     }
                   }
                 }
