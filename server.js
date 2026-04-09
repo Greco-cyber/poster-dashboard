@@ -395,13 +395,16 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
             // Якщо payed_sum має копійки — акційний доп (0.01 грн), пропускаємо
             if (payedSum % 100 !== 0) continue;
             const rawMod = String(p.modificator_name || "");
-            // Спочатку повна назва, потім розбиваємо по "+"
-            const fullInfo = findModByName(rawMod, MOD_PRICES);
-            if (fullInfo && fullInfo.price > 0) {
-              const amount = fullInfo.price * num;
-              if (fullInfo.workshop === 1) { txBar += amount; }
+            // Спочатку точний збіг повної назви, потім розбиваємо по "+"
+            const fullNorm = normalizeName(rawMod);
+            const fullExact = MOD_PRICES.get(fullNorm);
+            if (fullExact && fullExact.price > 0) {
+              // Точний збіг — один доп
+              const amount = fullExact.price * num;
+              if (fullExact.workshop === 1) { txBar += amount; }
               else { txKitchen += amount; }
             } else {
+              // Розбиваємо по "+" — кожна частина окремий доп
               const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
               for (const part of parts) {
                 const modInfo = findModByName(part, MOD_PRICES);
@@ -595,12 +598,13 @@ function go(fmt){
               // Якщо payed_sum має копійки — акційний доп (0.01 грн), пропускаємо
               if (payedSum % 100 !== 0) continue;
               const rawMod = String(p.modificator_name || "");
-              // Спочатку повна назва, потім розбиваємо по "+"
-              const fullInfo = findModByName(rawMod, MOD_PRICES);
-              if (fullInfo && fullInfo.price > 0) {
-                const a = Math.round(fullInfo.price * num * 100) / 100;
-                const label = normalizeName(rawMod);
-                if (fullInfo.workshop === 1) {
+              // Спочатку точний збіг повної назви, потім розбиваємо по "+"
+              const fullNorm = normalizeName(rawMod);
+              const fullExact = MOD_PRICES.get(fullNorm);
+              if (fullExact && fullExact.price > 0) {
+                const a = Math.round(fullExact.price * num * 100) / 100;
+                const label = fullNorm;
+                if (fullExact.workshop === 1) {
                   checkBar += a;
                   lines.push({ product: label, qty: num, amount: a, type: "Мод бар" });
                 } else {
