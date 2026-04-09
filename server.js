@@ -240,11 +240,15 @@ async function ensureProductBasePrices() {
   }
 }
 
-// -------------------- КЕШ: ціни модифікаторів --------------------
-// modification_id -> { price, workshop }
+// -------------------- КЕШ: ціни допів по назві --------------------
+// normalized_name -> { price, workshop }
 let MOD_PRICES = new Map();
 let MOD_PRICES_CACHE_AT = 0;
 const MOD_PRICES_TTL_MS = 30 * 60 * 1000;
+
+function normalizeName(s) {
+  return String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
 
 async function ensureModPrices() {
   const now = Date.now();
@@ -254,26 +258,34 @@ async function ensureModPrices() {
     const j = await poster("menu.getProducts");
     const arr = Array.isArray(j?.response) ? j.response : [];
     const map = new Map();
+    const DOP_CATS = new Set([17, 37, 41]);
 
     for (const p of arr) {
+      const catId = Number(p.menu_category_id ?? p.category_id);
+      if (!DOP_CATS.has(catId)) continue;
+
       const workshop = Number(p.workshop || 0);
-      if (!Array.isArray(p.group_modifications)) continue;
-      for (const group of p.group_modifications) {
-        if (!Array.isArray(group.modifications)) continue;
-        for (const mod of group.modifications) {
-          const modId = Number(mod.dish_modification_id);
-          const price = Number(mod.price || 0);
-          if (modId && price > 0 && !map.has(modId)) {
-            map.set(modId, { price, workshop });
-          }
-        }
+      const name = normalizeName(p.product_name);
+      let price = null;
+
+      if (Array.isArray(p.spots)) {
+        const spot = p.spots.find(s => Number(s.spot_id) === SPOT_ID);
+        if (spot) price = Number(spot.price) / 100;
+      }
+      if (price === null && p.price && typeof p.price === "object") {
+        const raw = p.price[String(SPOT_ID)] ?? p.price["1"];
+        if (raw != null) price = Number(raw) / 100;
+      }
+
+      if (name && price !== null && price > 0) {
+        map.set(name, { price, workshop });
       }
     }
 
     if (map.size) {
       MOD_PRICES = map;
       MOD_PRICES_CACHE_AT = now;
-      console.log(`MOD_PRICES loaded: ${map.size} modifications`);
+      console.log(`MOD_PRICES loaded: ${map.size} items`);
     }
   } catch (e) {
     console.error("ensureModPrices error:", e);
@@ -321,13 +333,12 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
           } else if (catId === 41) {
             txBar += payedSum / 100;
           } else if (modId !== "0") {
-            // Ціна з кешу модифікатора, workshop — від товару в чеку
-            const modInfo = MOD_PRICES.get(Number(modId));
-            const productInfo = PRODUCT_BASE_PRICE.get(pid);
+            // Шукаємо доп по назві модифікатора
+            const modName = normalizeName(p.modificator_name);
+            const modInfo = modName ? MOD_PRICES.get(modName) : null;
             if (modInfo && modInfo.price > 0) {
               const amount = modInfo.price * num;
-              const workshop = productInfo ? productInfo.workshop : modInfo.workshop;
-              if (workshop === 1) { txBar += amount; }
+              if (modInfo.workshop === 1) { txBar += amount; }
               else { txKitchen += amount; }
             }
           }
@@ -510,12 +521,11 @@ function go(fmt){
             } else if (catId === 41) {
               amount = payedSum / 100; type = "Доп бар"; checkBar += amount;
             } else if (modId !== "0") {
-              const modInfo = MOD_PRICES.get(Number(modId));
-              const productInfo = PRODUCT_BASE_PRICE.get(pid);
+              const modName = normalizeName(p.modificator_name);
+              const modInfo = modName ? MOD_PRICES.get(modName) : null;
               if (modInfo && modInfo.price > 0) {
                 amount = modInfo.price * num;
-                const workshop = productInfo ? productInfo.workshop : modInfo.workshop;
-                if (workshop === 1) { type = "Мод бар"; checkBar += amount; }
+                if (modInfo.workshop === 1) { type = "Мод бар"; checkBar += amount; }
                 else { type = "Мод кухня"; checkKitchen += amount; }
               }
             }
