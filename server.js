@@ -914,7 +914,7 @@ app.get("/api/waiters-bonus", async (req, res) => {
         name: String(w.name || ""),
         revenue,
         revenue_bonus:   r2(revenue     * 0.0075),
-        upsell_sum,
+        upsell_sum:      upsellSum,
         upsell_bonus:    r2(upsellSum   * 0.10),
         desserts_sum:    dessertsSum,
         desserts_bonus:  r2(dessertsSum * 0.05),
