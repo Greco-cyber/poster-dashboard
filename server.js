@@ -800,5 +800,84 @@ function go(fmt){
   }
 });
 
+// -------------------- BARMEN BONUS --------------------
+app.get("/api/barmen-bonus", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
+
+    const ALL_BONUS_CATS = new Set([28, 34, 48, 49, 50]);
+
+    // 1. Waiters sales за день
+    const waitersResp = await poster("dash.getWaitersSales", { dateFrom, dateTo });
+    const allWaiters = Array.isArray(waitersResp?.response) ? waitersResp.response : [];
+    const barmen = allWaiters.filter(w => String(w.name || "").toLowerCase().includes("бар"));
+    const barmenCount = Math.max(barmen.length, 1);
+
+    // 2. Revenue по категоріях
+    const catsResp = await poster("dash.getCategoriesSales", { dateFrom, dateTo });
+    const catsArr = Array.isArray(catsResp?.response) ? catsResp.response : [];
+    const catRevMap = new Map();
+    for (const x of catsArr) {
+      const cid = Number(x.category_id);
+      if (!ALL_BONUS_CATS.has(cid)) continue;
+      const raw = Number(x.revenue ?? x.sales_sum ?? x.sum ?? x.payed_sum ?? x.turnover ?? 0);
+      catRevMap.set(cid, raw / 100);
+    }
+
+    // 3. Upsell по барменах
+    const upsellMap = await calcUpsellForPeriod(dateFrom, dateTo);
+
+    const r2 = v => Math.round((v || 0) * 100) / 100;
+
+    // 4. Загальні суми по групах
+    const teaCoffeeRev = r2(catRevMap.get(28) || 0);
+    const cocktailsRev = r2(catRevMap.get(34) || 0);
+    const lemonadesRev = r2([48, 49, 50].reduce((s, id) => s + (catRevMap.get(id) || 0), 0));
+
+    const teaCoffeePer = r2(teaCoffeeRev * 0.07);
+    const cocktailsPer = r2(cocktailsRev * 0.15);
+    const lemonadesPer = r2(lemonadesRev * 0.10);
+
+    // 5. Рядок на кожного бармена
+    const response = barmen.map(w => {
+      const uid = String(w.user_id);
+      const revenue = r2(Number(w.revenue || 0) / 100);
+      const upsell = upsellMap.get(uid);
+      const upsellSum = upsell ? r2(upsell.sauces + upsell.kitchen + upsell.bar) : 0;
+
+      const revBonus    = r2(revenue * 0.013);
+      const upsellBonus = r2(upsellSum * 0.07);
+      const total       = r2(revBonus + upsellBonus + teaCoffeePer + cocktailsPer + lemonadesPer);
+
+      return {
+        user_id: uid,
+        name: String(w.name || ""),
+        revenue,
+        revenue_bonus: revBonus,
+        upsell_sum: upsellSum,
+        upsell_bonus: upsellBonus,
+        tea_coffee_share: teaCoffeePer,
+        cocktails_share: cocktailsPer,
+        lemonades_share: lemonadesPer,
+        total,
+      };
+    });
+
+    res.json({
+      dateFrom, dateTo, barmen_count: barmenCount,
+      categories: {
+        tea_coffee: teaCoffeeRev,
+        cocktails: cocktailsRev,
+        lemonades: lemonadesRev,
+      },
+      response,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error", detail: String(e) });
+  }
+});
+
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`API server listening on ${port}`));
