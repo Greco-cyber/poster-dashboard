@@ -27,8 +27,9 @@ export default function App() {
   const [daySales, setDaySales] = useState([]);
   const [avgPerMonthMap, setAvgPerMonthMap] = useState({});
   const [barData, setBarData] = useState(null);
-  const [upsellLoading, setUpsellLoading] = useState(false);
-  const [upsellData, setUpsellData] = useState([]);
+  const [bonusLoading, setBonusLoading] = useState(false);
+  const [barmenBonus, setBarmenBonus] = useState([]);
+  const [bonusCategories, setBonusCategories] = useState(null);
 
   const shotsOverride = useMemo(() => new Map([
     [230,1],[485,1],[307,2],[231,1],[316,1],[406,1],[183,1],[182,1],[317,1],
@@ -45,7 +46,7 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     setLoading(true); setError("");
-    setUpsellLoading(true);
+    setBonusLoading(true);
 
     try {
       const mFrom = firstDayOfMonthStr(date), mTo = lastDayOfMonthStr(date);
@@ -79,10 +80,11 @@ export default function App() {
     } catch(e) { setBarData(null); }
 
     try {
-      const dU = await fetchJson(`${API_BASE}/api/upsell-sales?dateFrom=${date}&dateTo=${date}`);
-      setUpsellData(Array.isArray(dU?.response) ? dU.response : []);
-    } catch(e) { setUpsellData([]); }
-    finally { setUpsellLoading(false); }
+      const dB = await fetchJson(`${API_BASE}/api/barmen-bonus?dateFrom=${date}&dateTo=${date}`);
+      setBarmenBonus(Array.isArray(dB?.response) ? dB.response : []);
+      setBonusCategories(dB?.categories || null);
+    } catch(e) { setBarmenBonus([]); setBonusCategories(null); }
+    finally { setBonusLoading(false); }
 
   }, [date, fetchJson, shotsOverride]);
 
@@ -111,7 +113,7 @@ export default function App() {
   }, [barData]);
 
   const showMain = !loading && daySales.length > 0;
-  const isLoading = loading || upsellLoading;
+  const isLoading = loading || bonusLoading;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
@@ -241,49 +243,66 @@ export default function App() {
             </div>
           </div>
 
-          {/* ВИТОРГ СОУСИ/ДОПИ */}
+          {/* БОНУС БАРМЕНІВ */}
           <div className="bg-gray-800 rounded-xl border border-gray-700 flex-1 flex flex-col min-h-0">
             <div className="px-3 py-2 border-b border-gray-700 flex items-center justify-between shrink-0">
-              <h2 className="text-sm font-bold text-white">🔥 Виторг соуси/допи</h2>
-              {upsellLoading && <span className="text-xs text-gray-500 animate-pulse">завантаження...</span>}
+              <h2 className="text-sm font-bold text-white">🍸 Бонус барменів</h2>
+              {bonusLoading && <span className="text-xs text-gray-500 animate-pulse">завантаження...</span>}
             </div>
-            <div className="p-2 flex-1">
-              {upsellData.length === 0 && !upsellLoading ? (
-                <p className="text-gray-500 text-xs text-center py-2">Немає даних</p>
+            <div className="p-2 flex-1 overflow-x-auto">
+              {barmenBonus.length === 0 && !bonusLoading ? (
+                <p className="text-gray-500 text-xs text-center py-2">Немає барменів за цей день</p>
               ) : (
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="text-gray-400 uppercase tracking-wider border-b border-gray-700">
+                    <tr className="text-gray-400 border-b border-gray-700">
                       <th className="text-left pb-2 font-medium">Ім'я</th>
-                      <th className="text-right pb-2 font-medium">Соуси</th>
-                      <th className="text-right pb-2 font-medium">Допи кух</th>
-                      <th className="text-right pb-2 font-medium">Допи бар</th>
-                      <th className="text-right pb-2 font-medium text-green-400">Разом</th>
-                      <th className="text-right pb-2 font-medium text-gray-500">Місяць</th>
+                      <th className="text-right pb-2 font-medium">
+                        Виторг<br/><span className="text-gray-600 font-normal">1.3%</span>
+                      </th>
+                      <th className="text-right pb-2 font-medium">
+                        Соуси/Допи<br/><span className="text-gray-600 font-normal">7%</span>
+                      </th>
+                      <th className="text-right pb-2 font-medium">
+                        Чай/Кофе<br/><span className="text-gray-600 font-normal">7%÷{barmenBonus.length||1}</span>
+                      </th>
+                      <th className="text-right pb-2 font-medium">
+                        Алко<br/><span className="text-gray-600 font-normal">15%÷{barmenBonus.length||1}</span>
+                      </th>
+                      <th className="text-right pb-2 font-medium">
+                        Лімонади<br/><span className="text-gray-600 font-normal">10%÷{barmenBonus.length||1}</span>
+                      </th>
+                      <th className="text-right pb-2 font-medium text-yellow-400">Бонус</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/50">
-                    {upsellData.map((row) => (
+                    {barmenBonus.map((row) => (
                       <tr key={row.user_id} className="hover:bg-gray-700/20">
-                        <td className="py-1.5 font-semibold text-white text-sm">{row.name||"—"}</td>
-                        <td className="py-1.5 text-right text-gray-300">{money(row.day_sauces||0)} ₴</td>
-                        <td className="py-1.5 text-right text-gray-300">{money(row.day_kitchen||0)} ₴</td>
-                        <td className="py-1.5 text-right text-gray-300">{money(row.day_bar||0)} ₴</td>
-                        <td className="py-1.5 text-right font-bold text-green-400">{money(row.day_sum)} ₴</td>
-                        <td className="py-1.5 text-right font-semibold text-gray-500">{money(row.month_sum)} ₴</td>
+                        <td className="py-2 font-semibold text-white">{row.name||"—"}</td>
+                        <td className="py-2 text-right">
+                          <p className="font-bold text-white">{money(row.revenue_bonus)} ₴</p>
+                          <p className="text-gray-500">{money(row.revenue)} ₴</p>
+                        </td>
+                        <td className="py-2 text-right">
+                          <p className="font-bold text-white">{money(row.upsell_bonus)} ₴</p>
+                          <p className="text-gray-500">{money(row.upsell_sum)} ₴</p>
+                        </td>
+                        <td className="py-2 text-right">
+                          <p className="font-bold text-blue-300">{money(row.tea_coffee_share)} ₴</p>
+                          {bonusCategories && <p className="text-gray-500">{money(bonusCategories.tea_coffee)} ₴</p>}
+                        </td>
+                        <td className="py-2 text-right">
+                          <p className="font-bold text-purple-300">{money(row.cocktails_share)} ₴</p>
+                          {bonusCategories && <p className="text-gray-500">{money(bonusCategories.cocktails)} ₴</p>}
+                        </td>
+                        <td className="py-2 text-right">
+                          <p className="font-bold text-green-300">{money(row.lemonades_share)} ₴</p>
+                          {bonusCategories && <p className="text-gray-500">{money(bonusCategories.lemonades)} ₴</p>}
+                        </td>
+                        <td className="py-2 text-right font-bold text-yellow-400 text-sm">{money(row.total)} ₴</td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-gray-600">
-                      <td className="pt-2 text-xs text-gray-400 font-bold uppercase">Разом</td>
-                      <td className="pt-2 text-right text-gray-300">{money(upsellData.reduce((s,r)=>s+(r.day_sauces||0),0))} ₴</td>
-                      <td className="pt-2 text-right text-gray-300">{money(upsellData.reduce((s,r)=>s+(r.day_kitchen||0),0))} ₴</td>
-                      <td className="pt-2 text-right text-gray-300">{money(upsellData.reduce((s,r)=>s+(r.day_bar||0),0))} ₴</td>
-                      <td className="pt-2 text-right font-bold text-green-400">{money(upsellData.reduce((s,r)=>s+r.day_sum,0))} ₴</td>
-                      <td className="pt-2 text-right font-bold text-gray-500">{money(upsellData.reduce((s,r)=>s+r.month_sum,0))} ₴</td>
-                    </tr>
-                  </tfoot>
                 </table>
               )}
             </div>
