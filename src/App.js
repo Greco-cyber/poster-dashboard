@@ -205,34 +205,34 @@ export default function App() {
 
           {/* БОНУС ОФІЦІАНТІВ */}
           <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
-            <div className="px-3 py-2 border-b border-gray-700 flex items-center justify-between">
-              <h2 className="text-sm font-bold text-white">🧾 Бонус офіціантів</h2>
+            <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+              <h2 className="text-base font-bold text-white">🧾 Бонус офіціантів</h2>
               {waitersLoading && <span className="text-xs text-gray-500 animate-pulse">завантаження...</span>}
             </div>
-            <div className="p-2 overflow-x-auto">
+            <div className="px-4 py-2">
               {waitersTable.length === 0 && !loading ? (
-                <p className="text-gray-500 text-xs text-center py-2">Немає офіціантів за цей день</p>
+                <p className="text-gray-500 text-sm text-center py-3">Немає офіціантів за цей день</p>
               ) : (
-                <table className="w-full text-xs">
+                <table className="w-full table-fixed">
                   <thead>
-                    <tr className="text-gray-400 border-b border-gray-700">
-                      <th className="text-left pb-2 font-medium">Ім'я</th>
-                      <th className="text-right pb-2 font-medium">Виторг</th>
-                      <th className="text-right pb-2 font-medium">Соуси/Допи</th>
-                      <th className="text-right pb-2 font-medium">Десерти</th>
-                      <th className="text-right pb-2 font-medium">Вина</th>
-                      <th className="text-right pb-2 font-medium">Алко</th>
+                    <tr className="text-gray-400 border-b border-gray-700/60">
+                      <th className="text-left py-2 text-xs font-medium w-2/6">Ім'я</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Виторг</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Соуси + доп</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Десерти</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Вино</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Алк. коктейлі</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-700/50">
+                  <tbody className="divide-y divide-gray-700/40">
                     {waitersTable.map((row) => (
                       <tr key={row.user_id} className="hover:bg-gray-700/20">
-                        <td className="py-2 font-semibold text-white">{row.name||"—"}</td>
-                        <td className="py-2 text-right font-bold text-white">{money(row.revenue_bonus)} ₴</td>
-                        <td className="py-2 text-right font-bold text-white">{money(row.upsell_bonus)} ₴</td>
-                        <td className="py-2 text-right font-bold text-pink-300">{money(row.desserts_bonus)} ₴</td>
-                        <td className="py-2 text-right font-bold text-purple-300">{money(row.wines_bonus)} ₴</td>
-                        <td className="py-2 text-right font-bold text-orange-300">{money(row.cocktails_bonus)} ₴</td>
+                        <td className="py-3 text-sm font-semibold text-white">{row.name||"—"}</td>
+                        <td className="py-3 text-right text-sm font-bold text-white">{money(row.revenue_bonus)} ₴</td>
+                        <td className="py-3 text-right text-sm font-bold text-white">{money(row.upsell_bonus)} ₴</td>
+                        <td className="py-3 text-right text-sm font-bold text-pink-300">{money(row.desserts_bonus)} ₴</td>
+                        <td className="py-3 text-right text-sm font-bold text-purple-300">{money(row.wines_bonus)} ₴</td>
+                        <td className="py-3 text-right text-sm font-bold text-orange-300">{money(row.cocktails_bonus)} ₴</td>
                       </tr>
                     ))}
                   </tbody>
@@ -242,35 +242,35 @@ export default function App() {
           </div>
 
           {/* БОНУС БАРМЕНІВ */}
-          <div className="bg-gray-800 rounded-xl border border-gray-700 flex-1 flex flex-col min-h-0">
-            <div className="px-3 py-2 border-b border-gray-700 flex items-center justify-between shrink-0">
-              <h2 className="text-sm font-bold text-white">🍸 Бонус барменів</h2>
+          <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
+            <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+              <h2 className="text-base font-bold text-white">🍸 Бонус барменів</h2>
               {bonusLoading && <span className="text-xs text-gray-500 animate-pulse">завантаження...</span>}
             </div>
-            <div className="p-2 flex-1 overflow-x-auto">
+            <div className="px-4 py-2">
               {barmenBonus.length === 0 && !bonusLoading ? (
-                <p className="text-gray-500 text-xs text-center py-2">Немає барменів за цей день</p>
+                <p className="text-gray-500 text-sm text-center py-3">Немає барменів за цей день</p>
               ) : (
-                <table className="w-full text-xs">
+                <table className="w-full table-fixed">
                   <thead>
-                    <tr className="text-gray-400 border-b border-gray-700">
-                      <th className="text-left pb-2 font-medium">Ім'я</th>
-                      <th className="text-right pb-2 font-medium">Виторг</th>
-                      <th className="text-right pb-2 font-medium">Соуси/Допи</th>
-                      <th className="text-right pb-2 font-medium">Чай/Кофе</th>
-                      <th className="text-right pb-2 font-medium">Алко</th>
-                      <th className="text-right pb-2 font-medium">Лімонади</th>
+                    <tr className="text-gray-400 border-b border-gray-700/60">
+                      <th className="text-left py-2 text-xs font-medium w-2/6">Ім'я</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Виторг</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Соуси + доп</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Чай / Кофе</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Алк. коктейлі</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Лимонади + Мохіто</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-700/50">
+                  <tbody className="divide-y divide-gray-700/40">
                     {barmenBonus.map((row) => (
                       <tr key={row.user_id} className="hover:bg-gray-700/20">
-                        <td className="py-2 font-semibold text-white">{row.name||"—"}</td>
-                        <td className="py-2 text-right font-bold text-white">{money(row.revenue_bonus)} ₴</td>
-                        <td className="py-2 text-right font-bold text-white">{money(row.upsell_bonus)} ₴</td>
-                        <td className="py-2 text-right font-bold text-blue-300">{money(row.tea_coffee_share)} ₴</td>
-                        <td className="py-2 text-right font-bold text-purple-300">{money(row.cocktails_share)} ₴</td>
-                        <td className="py-2 text-right font-bold text-green-300">{money(row.lemonades_share)} ₴</td>
+                        <td className="py-3 text-sm font-semibold text-white">{row.name||"—"}</td>
+                        <td className="py-3 text-right text-sm font-bold text-white">{money(row.revenue_bonus)} ₴</td>
+                        <td className="py-3 text-right text-sm font-bold text-white">{money(row.upsell_bonus)} ₴</td>
+                        <td className="py-3 text-right text-sm font-bold text-blue-300">{money(row.tea_coffee_share)} ₴</td>
+                        <td className="py-3 text-right text-sm font-bold text-purple-300">{money(row.cocktails_share)} ₴</td>
+                        <td className="py-3 text-right text-sm font-bold text-green-300">{money(row.lemonades_share)} ₴</td>
                       </tr>
                     ))}
                   </tbody>
