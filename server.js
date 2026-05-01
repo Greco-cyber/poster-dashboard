@@ -800,6 +800,138 @@ function go(fmt){
   }
 });
 
+// -------------------- WAITERS BONUS DATA --------------------
+const DESSERT_CATS  = new Set([32]);
+const WINE_CATS     = new Set([22, 23, 25, 26, 30, 39]);
+const COCKTAIL_CATS = new Set([34]);
+
+async function calcWaitersBonusData(dateFrom, dateTo) {
+  const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
+  const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
+  await ensureModPrices();
+
+  const userSums = new Map(); // uid -> { name, sauces, kitchen, bar, desserts, wines, cocktails }
+
+  const BATCH = 10;
+  const closedTx = transactions.filter(tx => tx.status === "2" && Number(tx.payed_sum) > 0);
+
+  for (let i = 0; i < closedTx.length; i += BATCH) {
+    const batch = closedTx.slice(i, i + BATCH);
+    await Promise.all(batch.map(async (tx) => {
+      const uid = String(tx.user_id);
+      const name = String(tx.name || "");
+      const txId = String(tx.transaction_id);
+      try {
+        const prodResp = await poster("dash.getTransactionProducts", { transaction_id: txId });
+        const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
+
+        let txSauces = 0, txKitchen = 0, txBar = 0;
+        let txDesserts = 0, txWines = 0, txCocktails = 0;
+
+        for (const p of products) {
+          const catId = Number(p.category_id);
+          const modId = String(p.modification_id || "0");
+          const num = Number(p.num || 1);
+          const payedSum = Number(p.payed_sum || 0);
+
+          // Категорійні бонуси
+          if (DESSERT_CATS.has(catId))       txDesserts  += payedSum / 100;
+          else if (WINE_CATS.has(catId))     txWines     += payedSum / 100;
+          else if (COCKTAIL_CATS.has(catId)) txCocktails += payedSum / 100;
+
+          // Upsell (та ж механіка)
+          if (catId === 17) {
+            txSauces += payedSum / 100;
+          } else if (catId === 37) {
+            txKitchen += payedSum / 100;
+          } else if (catId === 41) {
+            txBar += payedSum / 100;
+          } else if (modId !== "0") {
+            if (payedSum % 100 !== 0) continue;
+            const rawMod = String(p.modificator_name || "");
+            const { name: rawModName, qty: rawModQty } = parseModPart(rawMod);
+            const effectiveQty = rawModQty > 1 ? rawModQty : num;
+            const fullNorm = normalizeName(rawModName);
+            const fullExact = MOD_PRICES.get(fullNorm);
+            if (fullExact && fullExact.price > 0) {
+              const amount = fullExact.price * effectiveQty;
+              if (fullExact.workshop === 1) txBar += amount; else txKitchen += amount;
+            } else {
+              const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
+              for (const part of parts) {
+                const { name: partName, qty: modQty } = parseModPart(part);
+                const partQty = modQty > 1 ? modQty : num;
+                const modInfo = findModByName(partName, MOD_PRICES);
+                if (modInfo && modInfo.price > 0) {
+                  const amount = modInfo.price * partQty;
+                  if (modInfo.workshop === 1) txBar += amount; else txKitchen += amount;
+                }
+              }
+            }
+          }
+        }
+
+        if (txSauces + txKitchen + txBar + txDesserts + txWines + txCocktails > 0) {
+          if (!userSums.has(uid)) userSums.set(uid, { name, sauces:0, kitchen:0, bar:0, desserts:0, wines:0, cocktails:0 });
+          const u = userSums.get(uid);
+          u.sauces += txSauces; u.kitchen += txKitchen; u.bar += txBar;
+          u.desserts += txDesserts; u.wines += txWines; u.cocktails += txCocktails;
+        }
+      } catch { /* skip */ }
+    }));
+  }
+  return userSums;
+}
+
+// -------------------- WAITERS BONUS ENDPOINT --------------------
+app.get("/api/waiters-bonus", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom } = req.query;
+
+    const [waitersResp, bonusData] = await Promise.all([
+      poster("dash.getWaitersSales", { dateFrom, dateTo }),
+      calcWaitersBonusData(dateFrom, dateTo),
+    ]);
+
+    const allWaiters = Array.isArray(waitersResp?.response) ? waitersResp.response : [];
+    const waiters = allWaiters.filter(w => !String(w.name || "").toLowerCase().includes("бар"));
+
+    const r2 = v => Math.round((v || 0) * 100) / 100;
+
+    const response = waiters.map(w => {
+      const uid = String(w.user_id);
+      const revenue = r2(Number(w.revenue || 0) / 100);
+      const d = bonusData.get(uid);
+      const upsellSum    = d ? r2(d.sauces + d.kitchen + d.bar) : 0;
+      const dessertsSum  = d ? r2(d.desserts) : 0;
+      const winesSum     = d ? r2(d.wines) : 0;
+      const cocktailsSum = d ? r2(d.cocktails) : 0;
+
+      return {
+        user_id: uid,
+        name: String(w.name || ""),
+        revenue,
+        revenue_bonus:   r2(revenue     * 0.0075),
+        upsell_sum,
+        upsell_bonus:    r2(upsellSum   * 0.10),
+        desserts_sum:    dessertsSum,
+        desserts_bonus:  r2(dessertsSum * 0.05),
+        wines_sum:       winesSum,
+        wines_bonus:     r2(winesSum    * 0.05),
+        cocktails_sum:   cocktailsSum,
+        cocktails_bonus: r2(cocktailsSum * 0.05),
+      };
+    });
+
+    response.sort((a, b) => b.revenue - a.revenue);
+    res.json({ dateFrom, dateTo, response });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error", detail: String(e) });
+  }
+});
+
 // -------------------- BARMEN BONUS --------------------
 app.get("/api/barmen-bonus", async (req, res) => {
   try {
