@@ -26,6 +26,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [daySales, setDaySales] = useState([]);
   const [avgPerMonthMap, setAvgPerMonthMap] = useState({});
+  const [upsellData, setUpsellData] = useState([]);
   const [waitersBonus, setWaitersBonus] = useState([]);
   const [waitersLoading, setWaitersLoading] = useState(false);
   const [bonusLoading, setBonusLoading] = useState(false);
@@ -60,6 +61,11 @@ export default function App() {
     finally { setLoading(false); }
 
     try {
+      const dU = await fetchJson(`${API_BASE}/api/upsell-sales?dateFrom=${date}&dateTo=${date}`);
+      setUpsellData(Array.isArray(dU?.response) ? dU.response : []);
+    } catch(e) { setUpsellData([]); }
+
+    try {
       const dW = await fetchJson(`${API_BASE}/api/waiters-bonus?dateFrom=${date}&dateTo=${date}`);
       setWaitersBonus(Array.isArray(dW?.response) ? dW.response : []);
     } catch(e) { setWaitersBonus([]); }
@@ -82,6 +88,29 @@ export default function App() {
     const ch = daySales.reduce((s,w) => s+Number(w.clients||0), 0);
     return { rev, ch, avg: ch>0?rev/ch:0 };
   }, [daySales]);
+
+  const isBarName = (name) => { const n = (name || "").toLowerCase(); return n.includes("бар") || n.includes("bar"); };
+
+  const waitersTable = useMemo(() => {
+    return daySales
+      .filter(w => !isBarName(w.name))
+      .map(w => {
+        const revenue = Number(w.revenue || 0) / 100;
+        const uid = String(w.user_id);
+        const up = upsellData.find(u => String(u.user_id) === uid);
+        const upsellSum = up ? (up.day_sauces||0) + (up.day_kitchen||0) + (up.day_bar||0) : 0;
+        const wb = waitersBonus.find(b => String(b.user_id) === uid);
+        return {
+          user_id: uid, name: w.name,
+          revenue_bonus:   Math.round(revenue   * 0.0075 * 100) / 100,
+          upsell_bonus:    Math.round(upsellSum  * 0.10   * 100) / 100,
+          desserts_bonus:  wb?.desserts_bonus  || 0,
+          wines_bonus:     wb?.wines_bonus     || 0,
+          cocktails_bonus: wb?.cocktails_bonus || 0,
+        };
+      })
+      .sort((a, b) => b.revenue_bonus - a.revenue_bonus);
+  }, [daySales, upsellData, waitersBonus]);
 
   const showMain = !loading && daySales.length > 0;
   const isLoading = loading || waitersLoading || bonusLoading;
@@ -143,7 +172,7 @@ export default function App() {
                   const ch = Number(w.clients||0);
                   const avgDay = ch>0?rev/ch:0;
                   const avgMon = avgPerMonthMap[w.user_id];
-                  const isBar = w.name?.toLowerCase().includes("бар");
+                  const isBar = w.name?.toLowerCase().includes("бар") || w.name?.toLowerCase().includes("bar");
                   return (
                     <div key={w.user_id} className="px-3 py-2.5 flex items-center gap-3">
                       <div className="w-24 shrink-0">
@@ -181,7 +210,7 @@ export default function App() {
               {waitersLoading && <span className="text-xs text-gray-500 animate-pulse">завантаження...</span>}
             </div>
             <div className="p-2 overflow-x-auto">
-              {waitersBonus.length === 0 && !waitersLoading ? (
+              {waitersTable.length === 0 && !loading ? (
                 <p className="text-gray-500 text-xs text-center py-2">Немає офіціантів за цей день</p>
               ) : (
                 <table className="w-full text-xs">
@@ -196,7 +225,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/50">
-                    {waitersBonus.map((row) => (
+                    {waitersTable.map((row) => (
                       <tr key={row.user_id} className="hover:bg-gray-700/20">
                         <td className="py-2 font-semibold text-white">{row.name||"—"}</td>
                         <td className="py-2 text-right font-bold text-white">{money(row.revenue_bonus)} ₴</td>
