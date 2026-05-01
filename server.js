@@ -895,7 +895,8 @@ app.get("/api/waiters-bonus", async (req, res) => {
     ]);
 
     const allWaiters = Array.isArray(waitersResp?.response) ? waitersResp.response : [];
-    const waiters = allWaiters.filter(w => !String(w.name || "").toLowerCase().includes("бар"));
+    const isBarman = (name) => { const n = String(name || "").toLowerCase(); return n.includes("бар") || n.includes("bar"); };
+    const waiters = allWaiters.filter(w => !isBarman(w.name));
 
     const r2 = v => Math.round((v || 0) * 100) / 100;
 
@@ -943,7 +944,8 @@ app.get("/api/barmen-bonus", async (req, res) => {
     // 1. Waiters sales за день
     const waitersResp = await poster("dash.getWaitersSales", { dateFrom, dateTo });
     const allWaiters = Array.isArray(waitersResp?.response) ? waitersResp.response : [];
-    const barmen = allWaiters.filter(w => String(w.name || "").toLowerCase().includes("бар"));
+    const isBarman = (name) => { const n = String(name || "").toLowerCase(); return n.includes("бар") || n.includes("bar"); };
+    const barmen = allWaiters.filter(w => isBarman(w.name));
     const barmenCount = Math.max(barmen.length, 1);
 
     // 2. Revenue по категоріях
