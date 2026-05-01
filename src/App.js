@@ -264,42 +264,25 @@ export default function App() {
                         Соуси/Допи<br/><span className="text-gray-600 font-normal">7%</span>
                       </th>
                       <th className="text-right pb-2 font-medium">
-                        Чай/Кофе<br/><span className="text-gray-600 font-normal">7%÷{barmenBonus.length||1}</span>
+                        Чай/Кофе<br/><span className="text-gray-600 font-normal">7%</span>
                       </th>
                       <th className="text-right pb-2 font-medium">
-                        Алко<br/><span className="text-gray-600 font-normal">15%÷{barmenBonus.length||1}</span>
+                        Алко<br/><span className="text-gray-600 font-normal">15%</span>
                       </th>
                       <th className="text-right pb-2 font-medium">
-                        Лімонади<br/><span className="text-gray-600 font-normal">10%÷{barmenBonus.length||1}</span>
+                        Лімонади<br/><span className="text-gray-600 font-normal">10%</span>
                       </th>
-                      <th className="text-right pb-2 font-medium text-yellow-400">Бонус</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/50">
                     {barmenBonus.map((row) => (
                       <tr key={row.user_id} className="hover:bg-gray-700/20">
                         <td className="py-2 font-semibold text-white">{row.name||"—"}</td>
-                        <td className="py-2 text-right">
-                          <p className="font-bold text-white">{money(row.revenue_bonus)} ₴</p>
-                          <p className="text-gray-500">{money(row.revenue)} ₴</p>
-                        </td>
-                        <td className="py-2 text-right">
-                          <p className="font-bold text-white">{money(row.upsell_bonus)} ₴</p>
-                          <p className="text-gray-500">{money(row.upsell_sum)} ₴</p>
-                        </td>
-                        <td className="py-2 text-right">
-                          <p className="font-bold text-blue-300">{money(row.tea_coffee_share)} ₴</p>
-                          {bonusCategories && <p className="text-gray-500">{money(bonusCategories.tea_coffee)} ₴</p>}
-                        </td>
-                        <td className="py-2 text-right">
-                          <p className="font-bold text-purple-300">{money(row.cocktails_share)} ₴</p>
-                          {bonusCategories && <p className="text-gray-500">{money(bonusCategories.cocktails)} ₴</p>}
-                        </td>
-                        <td className="py-2 text-right">
-                          <p className="font-bold text-green-300">{money(row.lemonades_share)} ₴</p>
-                          {bonusCategories && <p className="text-gray-500">{money(bonusCategories.lemonades)} ₴</p>}
-                        </td>
-                        <td className="py-2 text-right font-bold text-yellow-400 text-sm">{money(row.total)} ₴</td>
+                        <td className="py-2 text-right font-bold text-white">{money(row.revenue_bonus)} ₴</td>
+                        <td className="py-2 text-right font-bold text-white">{money(row.upsell_bonus)} ₴</td>
+                        <td className="py-2 text-right font-bold text-blue-300">{money(row.tea_coffee_share)} ₴</td>
+                        <td className="py-2 text-right font-bold text-purple-300">{money(row.cocktails_share)} ₴</td>
+                        <td className="py-2 text-right font-bold text-green-300">{money(row.lemonades_share)} ₴</td>
                       </tr>
                     ))}
                   </tbody>
