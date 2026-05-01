@@ -1013,5 +1013,47 @@ app.get("/api/barmen-bonus", async (req, res) => {
   }
 });
 
+// -------------------- DEBUG: продажі по категорії --------------------
+app.get("/api/debug-cat", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+    const { dateFrom = todayYYYYMMDD(), dateTo = dateFrom, cats = "34" } = req.query;
+    const catSet = new Set(String(cats).split(",").map(Number));
+
+    const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
+    const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
+    const closedTx = transactions.filter(tx => tx.status === "2" && Number(tx.payed_sum) > 0);
+
+    const rows = [];
+    const BATCH = 10;
+    for (let i = 0; i < closedTx.length; i += BATCH) {
+      const batch = closedTx.slice(i, i + BATCH);
+      await Promise.all(batch.map(async (tx) => {
+        try {
+          const prodResp = await poster("dash.getTransactionProducts", { transaction_id: String(tx.transaction_id) });
+          const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
+          for (const p of products) {
+            if (!catSet.has(Number(p.category_id))) continue;
+            rows.push({
+              tx_id: tx.transaction_id,
+              waiter: tx.name,
+              date: tx.date_close_date,
+              product: p.product_name,
+              category_id: p.category_id,
+              qty: p.num,
+              payed_sum: Number(p.payed_sum || 0) / 100,
+            });
+          }
+        } catch { /* skip */ }
+      }));
+    }
+
+    rows.sort((a, b) => String(a.waiter).localeCompare(String(b.waiter)));
+    res.json({ dateFrom, dateTo, cats: [...catSet], count: rows.length, rows });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`API server listening on ${port}`));
