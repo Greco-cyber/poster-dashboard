@@ -32,6 +32,7 @@ export default function App() {
   const [bonusLoading, setBonusLoading] = useState(false);
   const [barmenBonus, setBarmenBonus] = useState([]);
   const [bonusCategories, setBonusCategories] = useState(null);
+  const [barData, setBarData] = useState(null);
 
   const fetchJson = useCallback(async (url) => {
     const r = await fetch(url);
@@ -77,6 +78,11 @@ export default function App() {
       setBonusCategories(dB?.categories || null);
     } catch(e) { setBarmenBonus([]); setBonusCategories(null); }
     finally { setBonusLoading(false); }
+
+    try {
+      const dBar = await fetchJson(`${API_BASE}/api/bar-sales?dateFrom=${date}&dateTo=${date}`);
+      setBarData(dBar || null);
+    } catch(e) { setBarData(null); }
 
   }, [date, fetchJson]);
 
@@ -202,6 +208,53 @@ export default function App() {
                 })}
             </div>
           </div>
+
+          {/* БАР */}
+          {barData && (
+            <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
+              <div className="px-3 py-2 border-b border-gray-700">
+                <h2 className="text-sm font-bold text-white">🍺 Бар</h2>
+              </div>
+              <div className="flex divide-x divide-gray-700">
+                {/* Ліво: категорії */}
+                <div className="flex-1 divide-y divide-gray-700/50">
+                  {(barData.categories || []).map((cat) => (
+                    <div key={cat.category_id} className="px-3 py-2 flex items-center justify-between">
+                      <span className="text-sm text-gray-300">{cat.name}</span>
+                      <span className="text-sm font-bold text-white">{cat.qty} шт</span>
+                    </div>
+                  ))}
+                </div>
+                {/* Право: кава закладки */}
+                <div className="flex-1 divide-y divide-gray-700/50">
+                  <div className="px-3 py-2">
+                    <p className="text-xs text-gray-400 font-medium">Зал</p>
+                    <p className="text-xs text-gray-500">Кава у залі</p>
+                    <p className="text-sm font-bold text-white mt-0.5">
+                      {barData.coffee?.zal?.qty ?? 0} шт
+                      <span className="text-gray-400 font-normal"> / {barData.coffee?.zal?.zakladki ?? 0} зак</span>
+                    </p>
+                  </div>
+                  <div className="px-3 py-2">
+                    <p className="text-xs text-gray-400 font-medium">Штат</p>
+                    <p className="text-xs text-gray-500">Кава персонал</p>
+                    <p className="text-sm font-bold text-white mt-0.5">
+                      {barData.coffee?.shtat?.qty ?? 0} шт
+                      <span className="text-gray-400 font-normal"> / {barData.coffee?.shtat?.zakladki ?? 0} зак</span>
+                    </p>
+                  </div>
+                  <div className="px-3 py-2 bg-gray-700/30">
+                    <p className="text-xs text-gray-400 font-medium">Всього</p>
+                    <p className="text-xs text-gray-500">{barData.coffee?.total_zakladki ?? 0} закл.</p>
+                    <p className="text-sm font-bold text-blue-300 mt-0.5">
+                      {barData.coffee?.total_qty ?? 0} шт
+                      <span className="text-gray-400 font-normal"> / {barData.coffee?.total_zakladki ?? 0} зак</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* БОНУС ОФІЦІАНТІВ */}
           <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
