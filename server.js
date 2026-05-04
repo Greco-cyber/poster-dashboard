@@ -157,14 +157,16 @@ app.get("/api/bar-sales", async (req, res) => {
       });
     } catch { /* keep defaults */ }
 
-    const shotsPerProduct = new Map([
-      [230,1],[485,1],[307,2],[231,1],[316,1],[406,1],[183,1],[182,1],[317,1],
-      [425,1],[424,1],[441,1],[422,1],[423,2],
-      [529,1],[530,1],[531,2],[533,1],[534,1],[535,1],
-    ]);
+    // Зал — кава для гостей; Штат — кава для персоналу
+    const ZAL_SHOTS   = new Map([[230,1],[485,1],[307,2],[231,1],[316,1],[406,1],[183,1],[182,1],[317,1],[425,1],[424,1],[441,1],[422,1],[423,2]]);
+    const SHTAT_SHOTS = new Map([[529,1],[530,1],[531,2],[533,1],[534,1],[535,1]]);
+    const shotsPerProduct = new Map([...ZAL_SHOTS, ...SHTAT_SHOTS]);
 
     await ensureProducts();
-    let byProduct = new Map(), totalQty = 0, totalZak = 0;
+    let byProduct = new Map();
+    let totalQty = 0, totalZak = 0;
+    let zalQty   = 0, zalZak   = 0;
+    let shtatQty = 0, shtatZak = 0;
     const prodSales = await fetchProductsSales({ dateFrom, dateTo });
 
     if (prodSales.items) {
@@ -176,10 +178,13 @@ app.get("/api/bar-sales", async (req, res) => {
         const per = shotsPerProduct.get(pid);
         const zak = qty * per;
         totalQty += qty; totalZak += zak;
+        if (ZAL_SHOTS.has(pid))   { zalQty   += qty; zalZak   += zak; }
+        else                       { shtatQty += qty; shtatZak += zak; }
         const info = PRODUCT_INFO.get(pid) || {};
         byProduct.set(pid, {
           product_id: pid, name: info.name || it.name || "",
           category_id: info.category_id ?? null,
+          group: ZAL_SHOTS.has(pid) ? "zal" : "shtat",
           qty, zakladki_per_unit: per, zakladki_total: zak,
         });
       }
@@ -189,6 +194,8 @@ app.get("/api/bar-sales", async (req, res) => {
       dateFrom, dateTo, categories,
       coffee: {
         total_qty: totalQty, total_zakladki: totalZak,
+        zal:   { qty: zalQty,   zakladki: zalZak   },
+        shtat: { qty: shtatQty, zakladki: shtatZak },
         by_product: [...byProduct.values()].sort((a, b) => b.qty - a.qty),
       },
       debug: { usedProductsSales: prodSales.used || null },
