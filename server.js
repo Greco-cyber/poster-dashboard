@@ -762,58 +762,76 @@ function go(f){
 
     // ---- HTML ----
     const TYPE_COLOR = {
-      "Соус":"#10b981","Доп кухня":"#f59e0b","Доп бар":"#3b82f6",
-      "Мод кухня":"#fb923c","Мод бар":"#60a5fa",
+      "Соус":"#10b981","Доп кухня":"#10b981","Доп бар":"#10b981",
+      "Мод кухня":"#10b981","Мод бар":"#10b981",
       "Десерт":"#f472b6","Вино":"#a78bfa","Коктейль":"#fbbf24",
+    };
+    // Відповідність типу → колонка дашборду
+    const DASH_COL = {
+      "Соус":      { label:"Соуси + доп", color:"#10b981" },
+      "Доп кухня": { label:"Соуси + доп", color:"#10b981" },
+      "Доп бар":   { label:"Соуси + доп", color:"#10b981" },
+      "Мод кухня": { label:"Соуси + доп", color:"#10b981" },
+      "Мод бар":   { label:"Соуси + доп", color:"#10b981" },
+      "Десерт":    { label:"Десерти",     color:"#f472b6" },
+      "Вино":      { label:"Вино",        color:"#a78bfa" },
+      "Коктейль":        { label:"Алк. коктейлі",      color:"#fbbf24" },
+      "Чай / Кофе":      { label:"Чай / Кофе",          color:"#60a5fa" },
+      "Алк. коктейлі":   { label:"Алк. коктейлі",      color:"#fbbf24" },
+      "Лимонади + Мохіто":{ label:"Лимонади + Мохіто", color:"#34d399" },
     };
 
     const buildRows = (u) => {
-      const revPct   = u.isBarman ? 0.013 : 0.0075;
-      const revBonus = r2(u.revenue * revPct);
-      let total = revBonus, rows = "";
+      let total = 0, rows = "";
 
-      rows += `<tr class="row-rev">
-        <td class="td-check">—</td><td class="td-time"></td>
-        <td>💰 <strong>Виторг</strong></td>
-        <td class="td-r">${f0(u.revenue)} ₴</td>
-        <td class="td-pct">${pStr(revPct)}</td>
-        <td class="td-bonus">${f2(revBonus)} ₴</td></tr>`;
-
+      // Групуємо по чеку
       for (const ch of (u.checks||[]).sort((a,b)=>a.time.localeCompare(b.time))) {
+        if (!ch.lines.length) continue;
+        const timeStr = (ch.time||"").slice(11,16);
+        // Заголовок чека
+        rows += `<tr class="row-check-header">
+          <td colspan="4" class="td-check-header">
+            Чек #${ch.tx_id}${timeStr ? ` · ${timeStr}` : ""}
+          </td>
+        </tr>`;
+        // Позиції чека
         for (const l of ch.lines) {
           const b = r2(l.amount*l.pct); total=r2(total+b);
-          const col = TYPE_COLOR[l.type]||"#9ca3af";
-          rows += `<tr>
-            <td class="td-check">#${ch.tx_id}</td>
-            <td class="td-time">${(ch.time||"").slice(11,16)}</td>
-            <td><span style="color:${col};font-weight:500">${l.product}</span>
-                <span class="badge" style="border-color:${col};color:${col}">${l.type}</span></td>
-            <td class="td-r">${f0(l.amount)} ₴</td>
-            <td class="td-pct">${pStr(l.pct)}</td>
+          const dc = DASH_COL[l.type] || { label: l.type, color:"#9ca3af" };
+          rows += `<tr class="row-item">
+            <td class="td-indent">↳</td>
+            <td>
+              <span class="dash-col-badge" style="background:${dc.color}22;color:${dc.color};border-color:${dc.color}55">${dc.label}</span>
+              <span class="item-name">${l.product}</span>
+            </td>
+            <td class="td-r">${f0(l.amount)} ₴ <span class="td-pct-inline">${pStr(l.pct)}</span></td>
             <td class="td-bonus">${f2(b)} ₴</td></tr>`;
         }
       }
 
       if (u.isBarman) {
         const shared = [
-          { label:"☕ Чай / Кава",          amt: teaCoffeeRev, pct: 0.07 },
-          { label:"🍸 Алк. коктейлі",       amt: cocktailsRev, pct: 0.15 },
-          { label:"🍋 Лимонади + Мохіто",   amt: lemonadesRev, pct: 0.10 },
+          { label:"☕ Чай / Кава",        amt: teaCoffeeRev, pct: 0.07, dashCol:"Чай / Кофе" },
+          { label:"🍸 Алк. коктейлі",     amt: cocktailsRev, pct: 0.15, dashCol:"Алк. коктейлі" },
+          { label:"🍋 Лимонади + Мохіто", amt: lemonadesRev, pct: 0.10, dashCol:"Лимонади + Мохіто" },
         ];
+        rows += `<tr class="row-check-header"><td colspan="4" class="td-check-header">Загальне по зміні</td></tr>`;
         for (const s of shared) {
           const b = r2(s.amt*s.pct); total=r2(total+b);
+          const dc = DASH_COL[s.dashCol] || { label: s.dashCol, color:"#60a5fa" };
           rows += `<tr class="row-shared">
-            <td class="td-check">— <span class="badge-shift">зміна</span></td>
-            <td class="td-time"></td>
-            <td>${s.label}</td>
-            <td class="td-r">${f0(s.amt)} ₴</td>
-            <td class="td-pct">${pStr(s.pct)}</td>
+            <td class="td-indent">↳</td>
+            <td>
+              <span class="dash-col-badge" style="background:${dc.color}22;color:${dc.color};border-color:${dc.color}55">${dc.label}</span>
+              <span class="item-name">${s.label}</span>
+            </td>
+            <td class="td-r">${f0(s.amt)} ₴ <span class="td-pct-inline">${pStr(s.pct)}</span></td>
             <td class="td-bonus">${f2(b)} ₴</td></tr>`;
         }
       }
 
       rows += `<tr class="row-total">
-        <td colspan="5">ПІДСУМОК</td>
+        <td colspan="3">ПІДСУМОК БОНУСУ</td>
         <td class="td-bonus" style="font-size:15px">${f2(r2(total))} ₴</td></tr>`;
       return rows;
     };
@@ -822,25 +840,21 @@ function go(f){
       if (!users.length) return "";
       let s = `<h2 class="sec-title">${title}</h2>`;
       for (const u of users) {
-        const revPct = u.isBarman ? 0.013 : 0.0075;
-        let total = r2(u.revenue * revPct);
+          let total = 0;
         for (const ch of u.checks) for (const l of ch.lines) total=r2(total+l.amount*l.pct);
         if (u.isBarman) total=r2(total+teaCoffeeRev*0.07+cocktailsRev*0.15+lemonadesRev*0.10);
         s += `<div class="ublock">
           <div class="uhead">
             <span class="uname">${u.name}</span>
             <span class="urole">${role}</span>
-            <span class="urev">Виторг: ${f0(u.revenue)} ₴</span>
             <span class="utotal">Бонус: ${f2(r2(total))} ₴</span>
           </div>
           <div style="overflow-x:auto">
           <table>
             <thead><tr>
-              <th style="width:90px">Чек #</th>
-              <th style="width:55px">Час</th>
+              <th style="width:24px"></th>
               <th>Позиція</th>
-              <th class="td-r" style="width:110px">Ціна</th>
-              <th class="td-pct" style="width:55px">%</th>
+              <th class="td-r" style="width:140px">Ціна / %</th>
               <th class="td-bonus" style="width:100px">Бонус</th>
             </tr></thead>
             <tbody>${buildRows(u)}</tbody>
@@ -872,17 +886,19 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 thead th{text-align:left;padding:7px 10px;color:#9ca3af;font-weight:600;font-size:11px;background:#1a2332;border-bottom:1px solid #374151}
 tbody td{padding:6px 10px;border-bottom:1px solid #1a2332;vertical-align:middle}
 tbody tr:last-child td{border-bottom:none}
-.td-check{color:#6b7280;font-size:12px;white-space:nowrap}
-.td-time{color:#6b7280;font-size:11px;white-space:nowrap}
 .td-r{text-align:right;white-space:nowrap;color:#d1d5db}
-.td-pct{text-align:right;white-space:nowrap;color:#9ca3af}
+.td-pct-inline{color:#9ca3af;font-size:11px;margin-left:4px}
 .td-bonus{text-align:right;white-space:nowrap;font-weight:600;color:#34d399}
+.td-indent{color:#4b5563;font-size:12px;width:24px;text-align:center}
 .badge{font-size:10px;border:1px solid;border-radius:3px;padding:1px 4px;margin-left:5px;opacity:.85}
-.badge-shift{font-size:10px;background:#1e3a5f;color:#60a5fa;border-radius:3px;padding:1px 5px}
-.row-rev td{background:#162032}
-.row-rev .td-bonus{color:#fbbf24}
+.dash-col-badge{display:inline-block;font-size:11px;font-weight:600;border:1px solid;border-radius:4px;padding:1px 6px;margin-right:6px;white-space:nowrap}
+.item-name{font-size:13px;color:#9ca3af}
+.row-check-header td{background:#0f172a;padding:8px 10px 4px}
+.td-check-header{font-size:12px;font-weight:700;color:#60a5fa;letter-spacing:0.03em}
+.row-item td{background:#1f2937}
+.row-item:hover td{background:#263447}
 .row-shared td{background:#1a1f2e}
-.row-total td{background:#064e3b;font-weight:700;color:#34d399}
+.row-total td{background:#064e3b;font-weight:700;color:#34d399;padding:9px 10px}
 </style></head><body>
 <div class="topbar">
   <h1>💰 Бонуси — ${dateFrom}${dateFrom!==dateTo?" → "+dateTo:""}</h1>
