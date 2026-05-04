@@ -776,7 +776,7 @@ function go(f){
       "Десерт":    { label:"Десерти",     color:"#f472b6" },
       "Вино":      { label:"Вино",        color:"#a78bfa" },
       "Коктейль":        { label:"Алк. коктейлі",      color:"#fbbf24" },
-      "Чай / Кофе":      { label:"Чай / Кофе",          color:"#60a5fa" },
+      "Чай / Кава":      { label:"Чай / Кава",          color:"#60a5fa" },
       "Алк. коктейлі":   { label:"Алк. коктейлі",      color:"#fbbf24" },
       "Лимонади + Мохіто":{ label:"Лимонади + Мохіто", color:"#34d399" },
     };
@@ -811,7 +811,7 @@ function go(f){
 
       if (u.isBarman) {
         const shared = [
-          { label:"☕ Чай / Кава",        amt: teaCoffeeRev, pct: 0.07, dashCol:"Чай / Кофе" },
+          { label:"☕ Чай / Кава",        amt: teaCoffeeRev, pct: 0.07, dashCol:"Чай / Кава" },
           { label:"🍸 Алк. коктейлі",     amt: cocktailsRev, pct: 0.15, dashCol:"Алк. коктейлі" },
           { label:"🍋 Лимонади + Мохіто", amt: lemonadesRev, pct: 0.10, dashCol:"Лимонади + Мохіто" },
         ];
