@@ -514,7 +514,7 @@ app.get("/api/upsell-sales", async (req, res) => {
   }
 });
 
-// -------------------- UPSELL DETAIL ENDPOINT --------------------
+// -------------------- BONUS DETAIL ENDPOINT --------------------
 app.get("/api/upsell-detail", async (req, res) => {
   try {
     if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
@@ -522,36 +522,35 @@ app.get("/api/upsell-detail", async (req, res) => {
     const { format = "html" } = req.query;
     let { dateFrom, dateTo } = req.query;
 
+    // ---- Форма вибору дати ----
     if (!dateFrom && format === "html") {
       const today = todayYYYYMMDD();
       const todayInput = `${today.slice(0,4)}-${today.slice(4,6)}-${today.slice(6,8)}`;
-      const html = `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
-<title>Деталі допів — GRECO</title>
+      const formHtml = `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
+<title>Деталі бонусів — GRECO</title>
 <style>
-  body{font-family:sans-serif;background:#1a1a2e;color:#eee;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-  .card{background:#16213e;padding:40px;border-radius:12px;width:400px;box-shadow:0 4px 20px rgba(0,0,0,0.4)}
-  h1{color:#f0a500;margin:0 0 24px;font-size:22px}
-  label{display:block;color:#aaa;font-size:13px;margin-bottom:4px;margin-top:16px}
-  input[type=date]{width:100%;padding:10px;background:#0f3460;border:1px solid #444;border-radius:6px;color:#fff;font-size:15px;box-sizing:border-box}
+  body{font-family:sans-serif;background:#111827;color:#eee;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+  .card{background:#1f2937;padding:40px;border-radius:12px;width:400px;box-shadow:0 4px 20px rgba(0,0,0,0.5)}
+  h1{color:#f59e0b;margin:0 0 24px;font-size:22px}
+  label{display:block;color:#9ca3af;font-size:13px;margin-bottom:4px;margin-top:16px}
+  input[type=date]{width:100%;padding:10px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:#fff;font-size:15px;box-sizing:border-box}
   .btns{display:flex;gap:10px;margin-top:24px}
   .btn{flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:bold;cursor:pointer}
-  .btn-html{background:#0f3460;color:#00d4ff}.btn-csv{background:#27ae60;color:#fff}
+  .btn-html{background:#1d4ed8;color:#fff}.btn-csv{background:#059669;color:#fff}
   .btn:hover{opacity:0.85}
   .presets{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-  .preset{padding:5px 10px;background:#0f3460;border:1px solid #444;border-radius:4px;color:#aaa;font-size:12px;cursor:pointer}
-  .preset:hover{background:#1a3a6e;color:#fff}
+  .preset{padding:5px 10px;background:#374151;border:1px solid #4b5563;border-radius:4px;color:#9ca3af;font-size:12px;cursor:pointer}
+  .preset:hover{background:#4b5563;color:#fff}
 </style></head><body>
 <div class="card">
-  <h1>🔥 Деталі допів/соусів</h1>
-  <label>Дата від</label>
-  <input type="date" id="from" value="${todayInput}">
-  <label>Дата до</label>
-  <input type="date" id="to" value="${todayInput}">
+  <h1>💰 Деталі бонусів</h1>
+  <label>Дата від</label><input type="date" id="from" value="${todayInput}">
+  <label>Дата до</label><input type="date" id="to" value="${todayInput}">
   <div class="presets">
-    <span class="preset" onclick="setPreset(0)">Сьогодні</span>
-    <span class="preset" onclick="setPreset(1)">Вчора</span>
-    <span class="preset" onclick="setPreset(7)">Тиждень</span>
-    <span class="preset" onclick="setPreset(30)">Місяць</span>
+    <span class="preset" onclick="setP(0)">Сьогодні</span>
+    <span class="preset" onclick="setP(1)">Вчора</span>
+    <span class="preset" onclick="setP(7)">Тиждень</span>
+    <span class="preset" onclick="setP(30)">Місяць</span>
   </div>
   <div class="btns">
     <button class="btn btn-html" onclick="go('html')">👁 Переглянути</button>
@@ -559,23 +558,23 @@ app.get("/api/upsell-detail", async (req, res) => {
   </div>
 </div>
 <script>
-function fmt(d){return d.toISOString().slice(0,10)}
-function setPreset(days){
+function fD(d){return d.toISOString().slice(0,10)}
+function setP(days){
   const to=new Date(),from=new Date();
   if(days===1){to.setDate(to.getDate()-1);from.setDate(from.getDate()-1);}
   else if(days>1){from.setDate(from.getDate()-days);}
-  document.getElementById('from').value=fmt(from);
-  document.getElementById('to').value=fmt(to);
+  document.getElementById('from').value=fD(from);
+  document.getElementById('to').value=fD(to);
 }
-function go(fmt){
+function go(f){
   const from=document.getElementById('from').value.replace(/-/g,'');
   const to=document.getElementById('to').value.replace(/-/g,'');
   if(!from||!to){alert('Вкажіть дати');return;}
-  window.location.href='/api/upsell-detail?dateFrom='+from+'&dateTo='+to+'&format='+fmt;
+  window.location.href='/api/upsell-detail?dateFrom='+from+'&dateTo='+to+'&format='+f;
 }
 </script></body></html>`;
       res.setHeader("Content-Type","text/html; charset=utf-8");
-      return res.send(html);
+      return res.send(formHtml);
     }
 
     if (!dateFrom) dateFrom = todayYYYYMMDD();
@@ -583,223 +582,319 @@ function go(fmt){
 
     await ensureProductBasePrices();
     await ensureModPrices();
+
+    const isBarman = (name) => { const n = String(name||"").toLowerCase(); return n.includes("бар") || n.includes("bar"); };
+
+    // 1. Виторг по кожному
+    const waitersResp = await poster("dash.getWaitersSales", { dateFrom, dateTo });
+    const allWaiters = Array.isArray(waitersResp?.response) ? waitersResp.response : [];
+    const revenueMap = new Map();
+    for (const w of allWaiters) {
+      revenueMap.set(String(w.user_id), {
+        name: String(w.name || ""),
+        revenue: Number(w.revenue || 0) / 100,
+        isBarman: isBarman(w.name),
+      });
+    }
+
+    // 2. Спільні категорії барменів (чай/кава=28, коктейлі=34, лимонади=48+49+50)
+    const catsResp = await poster("dash.getCategoriesSales", { dateFrom, dateTo });
+    const catsArr = Array.isArray(catsResp?.response) ? catsResp.response : [];
+    const catRevMap = new Map();
+    for (const x of catsArr) {
+      const cid = Number(x.category_id);
+      const raw = Number(x.revenue ?? x.sales_sum ?? x.sum ?? x.payed_sum ?? x.turnover ?? 0);
+      catRevMap.set(cid, raw / 100);
+    }
+    const teaCoffeeRev = catRevMap.get(28) || 0;
+    const cocktailsRev = catRevMap.get(34) || 0;
+    const lemonadesRev = [48,49,50].reduce((s,id) => s + (catRevMap.get(id)||0), 0);
+
+    // 3. Перебір чеків — збираємо позиції по кожному офіціанту/бармену
     const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
     const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
-    const userDetails = new Map();
-    const BATCH = 10;
-    // Тільки закриті чеки з ненульовою оплатою
     const closedTx = transactions.filter(tx => tx.status === "2" && Number(tx.payed_sum) > 0);
 
+    const DESSERT_CATS_D = new Set([32]);
+    const WINE_CATS_D    = new Set([22,23,25,26,30,39]);
+    const COCKTAIL_CAT_D = new Set([34]);
+
+    // uid -> { name, isBarman, revenue, checks: [{ tx_id, time, lines:[{product,qty,amount,pct,type}] }] }
+    const userDetails = new Map();
+
+    const BATCH = 10;
     for (let i = 0; i < closedTx.length; i += BATCH) {
       const batch = closedTx.slice(i, i + BATCH);
       await Promise.all(batch.map(async (tx) => {
         const uid = String(tx.user_id);
-        const name = String(tx.name || "");
+        const txName = String(tx.name || "");
+        const txIsBar = isBarman(txName);
         const txId = String(tx.transaction_id);
         const time = String(tx.date_close_date || "");
-        const isDelivery = Number(tx.service_mode) === 2 || Number(tx.service_mode) === 3;
         try {
           const prodResp = await poster("dash.getTransactionProducts", { transaction_id: txId });
           const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
           const lines = [];
-          let checkSauces = 0, checkKitchen = 0, checkBar = 0;
+          const upsellPct = txIsBar ? 0.07 : 0.10;
 
           for (const p of products) {
-            const catId = Number(p.category_id);
-            const modId = String(p.modification_id || "0");
-            const num = Number(p.num || 1);
-            const payedSum = Number(p.payed_sum || 0);
-            const pid = Number(p.product_id);
-            const productName = String(p.product_name || "");
-            const modName = String(p.modificator_name || "");
-            let amount = 0, type = null;
+            const catId  = Number(p.category_id);
+            const modId  = String(p.modification_id || "0");
+            const num    = Number(p.num || 1);
+            const payed  = Number(p.payed_sum || 0);
+            const pName  = String(p.product_name || "");
 
+            // Соуси / допи кухня / допи бар
             if (catId === 17) {
-              amount = payedSum / 100; type = "Соус"; checkSauces += amount;
-            } else if (catId === 37) {
-              amount = payedSum / 100; type = "Доп кухня"; checkKitchen += amount;
-            } else if (catId === 41) {
-              amount = payedSum / 100; type = "Доп бар"; checkBar += amount;
-            } else if (modId !== "0") {
-              // Якщо payed_sum має копійки — акційний доп (0.01 грн), пропускаємо
-              if (payedSum % 100 !== 0) continue;
+              const a = payed/100; if (a>0) lines.push({ product: pName, qty: num, amount: Math.round(a*100)/100, pct: upsellPct, type:"Соус" });
+              continue;
+            }
+            if (catId === 37) {
+              const a = payed/100; if (a>0) lines.push({ product: pName, qty: num, amount: Math.round(a*100)/100, pct: upsellPct, type:"Доп кухня" });
+              continue;
+            }
+            if (catId === 41) {
+              const a = payed/100; if (a>0) lines.push({ product: pName, qty: num, amount: Math.round(a*100)/100, pct: upsellPct, type:"Доп бар" });
+              continue;
+            }
+
+            // Категорійні бонуси офіціантів (не барменів)
+            if (!txIsBar) {
+              if (DESSERT_CATS_D.has(catId)) {
+                const a = payed/100; if (a>0) lines.push({ product: pName, qty: num, amount: Math.round(a*100)/100, pct:0.05, type:"Десерт" });
+                continue;
+              }
+              if (WINE_CATS_D.has(catId)) {
+                const a = payed/100; if (a>0) lines.push({ product: pName, qty: num, amount: Math.round(a*100)/100, pct:0.05, type:"Вино" });
+                continue;
+              }
+              if (COCKTAIL_CAT_D.has(catId)) {
+                const a = payed/100; if (a>0) lines.push({ product: pName, qty: num, amount: Math.round(a*100)/100, pct:0.05, type:"Коктейль" });
+                continue;
+              }
+            }
+
+            // Модифікатори
+            if (modId !== "0") {
+              if (payed % 100 !== 0) continue; // промо, пропускаємо
               const rawMod = String(p.modificator_name || "");
-              // Спочатку точний збіг повної назви, потім розбиваємо по "+"
-              const { name: rawModName, qty: rawModQty } = parseModPart(rawMod);
-              const effectiveQty = rawModQty > 1 ? rawModQty : num;
-              const fullNorm = normalizeName(rawModName);
+              const { name: rName, qty: rQty } = parseModPart(rawMod);
+              const effQty = rQty > 1 ? rQty : num;
+              const fullNorm = normalizeName(rName);
               const fullExact = MOD_PRICES.get(fullNorm);
               if (fullExact && fullExact.price > 0) {
-                const a = Math.round(fullExact.price * effectiveQty * 100) / 100;
-                if (fullExact.workshop === 1) {
-                  checkBar += a;
-                  lines.push({ product: fullNorm, qty: effectiveQty, amount: a, type: "Мод бар" });
-                } else {
-                  checkKitchen += a;
-                  lines.push({ product: fullNorm, qty: effectiveQty, amount: a, type: "Мод кухня" });
-                }
+                const a = Math.round(fullExact.price * effQty * 100) / 100;
+                lines.push({ product: rName, qty: effQty, amount: a, pct: upsellPct, type: fullExact.workshop===1?"Мод бар":"Мод кухня" });
               } else {
-                const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
-                for (const part of parts) {
-                  const { name: partName, qty: modQty } = parseModPart(part);
-                  const partQty = modQty > 1 ? modQty : num;
-                  const modInfo = findModByName(partName, MOD_PRICES);
-                  if (modInfo && modInfo.price > 0) {
-                    const a = Math.round(modInfo.price * partQty * 100) / 100;
-                    const label = normalizeName(partName);
-                    if (modInfo.workshop === 1) {
-                      checkBar += a;
-                      lines.push({ product: label, qty: partQty, amount: a, type: "Мод бар" });
-                    } else {
-                      checkKitchen += a;
-                      lines.push({ product: label, qty: partQty, amount: a, type: "Мод кухня" });
-                    }
+                for (const part of rawMod.split("+").map(s=>s.trim()).filter(s=>s.length>3)) {
+                  const { name: pN, qty: pQ } = parseModPart(part);
+                  const pQty = pQ > 1 ? pQ : num;
+                  const mInfo = findModByName(pN, MOD_PRICES);
+                  if (mInfo && mInfo.price > 0) {
+                    const a = Math.round(mInfo.price * pQty * 100) / 100;
+                    lines.push({ product: pN, qty: pQty, amount: a, pct: upsellPct, type: mInfo.workshop===1?"Мод бар":"Мод кухня" });
                   }
                 }
               }
             }
-
-            if (type && amount > 0) {
-              lines.push({
-                product: modName ? `${productName} ${modName}` : productName,
-                qty: num, amount: Math.round(amount * 100) / 100, type,
-              });
-            }
           }
 
-          const checkTotal = checkSauces + checkKitchen + checkBar;
-          if (checkTotal > 0) {
-            if (!userDetails.has(uid)) userDetails.set(uid, { name, checks: [], totals: { sauces:0, kitchen:0, bar:0, sum:0 } });
-            const u = userDetails.get(uid);
-            u.checks.push({ transaction_id: txId, time, lines,
-              sauces: Math.round(checkSauces*100)/100,
-              kitchen: Math.round(checkKitchen*100)/100,
-              bar: Math.round(checkBar*100)/100,
-              total: Math.round(checkTotal*100)/100 });
-            u.totals.sauces += checkSauces; u.totals.kitchen += checkKitchen;
-            u.totals.bar += checkBar; u.totals.sum += checkTotal;
+          if (lines.length > 0) {
+            if (!userDetails.has(uid)) {
+              const rv = revenueMap.get(uid) || {};
+              userDetails.set(uid, { name: rv.name||txName, isBarman: txIsBar, revenue: rv.revenue||0, checks:[] });
+            }
+            userDetails.get(uid).checks.push({ tx_id: txId, time, lines });
           }
         } catch { /* skip */ }
       }));
     }
 
-    const round = v => Math.round((v||0)*100)/100;
-    const sorted = [...userDetails.values()].sort((a,b) => b.totals.sum - a.totals.sum);
-
-    if (format === "csv") {
-      // Заголовок
-      const rows = [[
-        "Офіціант",
-        "Чек №",
-        "Дата і час",
-        "Позиція",
-        "К-сть",
-        "Категорія",
-        "Соуси (грн)",
-        "Допи кухня (грн)",
-        "Допи бар (грн)",
-        "Сума позиції (грн)",
-        "Підсумок чеку (грн)",
-      ]];
-
-      for (const u of sorted) {
-        let firstCheckRow = true;
-        for (const ch of u.checks.sort((a,b)=>a.time.localeCompare(b.time))) {
-          let firstLineRow = true;
-          for (const line of ch.lines) {
-            const isSauce = line.type === "Соус";
-            const isKitchen = line.type === "Доп кухня" || line.type === "Мод кухня";
-            const isBar = line.type === "Доп бар" || line.type === "Мод бар";
-            rows.push([
-              firstLineRow ? u.name : "",           // Офіціант — тільки в першому рядку позиції
-              firstLineRow ? ch.transaction_id : "", // Чек № — тільки в першому рядку
-              firstLineRow ? ch.time : "",           // Час — тільки в першому рядку
-              line.product,
-              line.qty,
-              line.type,
-              isSauce ? String(line.amount).replace(".",",") : "",
-              isKitchen ? String(line.amount).replace(".",",") : "",
-              isBar ? String(line.amount).replace(".",",") : "",
-              String(line.amount).replace(".",","),
-              "",
-            ]);
-            firstLineRow = false;
-          }
-          // Підсумок чеку — окремий рядок з підсвіткою
-          rows.push([
-            "", "", "",
-            "ПІДСУМОК ЧЕКУ",
-            "", "",
-            ch.sauces ? String(ch.sauces).replace(".",",") : "",
-            ch.kitchen ? String(ch.kitchen).replace(".",",") : "",
-            ch.bar ? String(ch.bar).replace(".",",") : "",
-            "",
-            String(ch.total).replace(".",","),
-          ]);
-          rows.push([]); // порожній рядок між чеками
-          firstCheckRow = false;
-        }
-        // Підсумок офіціанта
-        rows.push([
-          u.name,
-          "ПІДСУМОК ОФІЦІАНТА", "", "", "", "",
-          String(round(u.totals.sauces)).replace(".",","),
-          String(round(u.totals.kitchen)).replace(".",","),
-          String(round(u.totals.bar)).replace(".",","),
-          "",
-          String(round(u.totals.sum)).replace(".",","),
-        ]);
-        rows.push([]); // порожній рядок між офіціантами
-        rows.push([]);
+    // Додаємо тих у кого є виторг але немає допів
+    for (const [uid, info] of revenueMap) {
+      if (!userDetails.has(uid)) {
+        userDetails.set(uid, { name: info.name, isBarman: info.isBarman, revenue: info.revenue, checks:[] });
+      } else {
+        const u = userDetails.get(uid);
+        u.revenue = info.revenue; u.name = info.name; u.isBarman = info.isBarman;
       }
+    }
 
+    const r2  = v => Math.round((v||0)*100)/100;
+    const f0  = v => Number(v).toLocaleString("uk-UA",{minimumFractionDigits:0,maximumFractionDigits:0});
+    const f2  = v => Number(v).toLocaleString("uk-UA",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const pStr = v => `${+(v*100).toFixed(2)}%`;
+
+    const waiters = [...userDetails.values()].filter(u=>!u.isBarman).sort((a,b)=>b.revenue-a.revenue);
+    const barmen  = [...userDetails.values()].filter(u=>u.isBarman).sort((a,b)=>b.revenue-a.revenue);
+
+    // ---- CSV ----
+    if (format === "csv") {
+      const rows = [["Роль","Ім'я","Чек #","Час","Позиція","Категорія","Ціна (₴)","% бонусу","Бонус (₴)"]];
+      const addRows = (u, role) => {
+        const revPct   = u.isBarman ? 0.013 : 0.0075;
+        const revBonus = r2(u.revenue * revPct);
+        let total = revBonus;
+        rows.push([role,u.name,"—","","Виторг","Виторг",f2(u.revenue),pStr(revPct),f2(revBonus)]);
+        for (const ch of u.checks.sort((a,b)=>a.time.localeCompare(b.time))) {
+          for (const l of ch.lines) {
+            const b = r2(l.amount*l.pct); total=r2(total+b);
+            rows.push([role,u.name,"#"+ch.tx_id,ch.time,l.product,l.type,f2(l.amount),pStr(l.pct),f2(b)]);
+          }
+        }
+        if (u.isBarman) {
+          const tc=r2(teaCoffeeRev*0.07), co=r2(cocktailsRev*0.15), le=r2(lemonadesRev*0.10);
+          rows.push([role,u.name,"—","","☕ Чай/Кава (зміна)","Спільне",f2(teaCoffeeRev),"7%",f2(tc)]);
+          rows.push([role,u.name,"—","","🍸 Алк. коктейлі (зміна)","Спільне",f2(cocktailsRev),"15%",f2(co)]);
+          rows.push([role,u.name,"—","","🍋 Лимонади + Мохіто (зміна)","Спільне",f2(lemonadesRev),"10%",f2(le)]);
+          total=r2(total+tc+co+le);
+        }
+        rows.push(["","ПІДСУМОК: "+u.name,"","","","","","",f2(r2(total))]);
+        rows.push([]);
+      };
+      for (const u of waiters) addRows(u,"Офіціант");
+      for (const u of barmen)  addRows(u,"Бармен");
       const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\n");
       res.setHeader("Content-Type","text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition",`attachment; filename="upsell_${dateFrom}_${dateTo}.csv"`);
-      return res.send("\uFEFF"+csv);
+      res.setHeader("Content-Disposition",`attachment; filename="bonus_${dateFrom}_${dateTo}.csv"`);
+      return res.send("﻿feff"+csv);
     }
 
-    let html = `<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
-<title>Деталі допів — ${dateFrom}</title>
+    // ---- HTML ----
+    const TYPE_COLOR = {
+      "Соус":"#10b981","Доп кухня":"#f59e0b","Доп бар":"#3b82f6",
+      "Мод кухня":"#fb923c","Мод бар":"#60a5fa",
+      "Десерт":"#f472b6","Вино":"#a78bfa","Коктейль":"#fbbf24",
+    };
+
+    const buildRows = (u) => {
+      const revPct   = u.isBarman ? 0.013 : 0.0075;
+      const revBonus = r2(u.revenue * revPct);
+      let total = revBonus, rows = "";
+
+      rows += `<tr class="row-rev">
+        <td class="td-check">—</td><td class="td-time"></td>
+        <td>💰 <strong>Виторг</strong></td>
+        <td class="td-r">${f0(u.revenue)} ₴</td>
+        <td class="td-pct">${pStr(revPct)}</td>
+        <td class="td-bonus">${f2(revBonus)} ₴</td></tr>`;
+
+      for (const ch of (u.checks||[]).sort((a,b)=>a.time.localeCompare(b.time))) {
+        for (const l of ch.lines) {
+          const b = r2(l.amount*l.pct); total=r2(total+b);
+          const col = TYPE_COLOR[l.type]||"#9ca3af";
+          rows += `<tr>
+            <td class="td-check">#${ch.tx_id}</td>
+            <td class="td-time">${(ch.time||"").slice(11,16)}</td>
+            <td><span style="color:${col};font-weight:500">${l.product}</span>
+                <span class="badge" style="border-color:${col};color:${col}">${l.type}</span></td>
+            <td class="td-r">${f0(l.amount)} ₴</td>
+            <td class="td-pct">${pStr(l.pct)}</td>
+            <td class="td-bonus">${f2(b)} ₴</td></tr>`;
+        }
+      }
+
+      if (u.isBarman) {
+        const shared = [
+          { label:"☕ Чай / Кава",          amt: teaCoffeeRev, pct: 0.07 },
+          { label:"🍸 Алк. коктейлі",       amt: cocktailsRev, pct: 0.15 },
+          { label:"🍋 Лимонади + Мохіто",   amt: lemonadesRev, pct: 0.10 },
+        ];
+        for (const s of shared) {
+          const b = r2(s.amt*s.pct); total=r2(total+b);
+          rows += `<tr class="row-shared">
+            <td class="td-check">— <span class="badge-shift">зміна</span></td>
+            <td class="td-time"></td>
+            <td>${s.label}</td>
+            <td class="td-r">${f0(s.amt)} ₴</td>
+            <td class="td-pct">${pStr(s.pct)}</td>
+            <td class="td-bonus">${f2(b)} ₴</td></tr>`;
+        }
+      }
+
+      rows += `<tr class="row-total">
+        <td colspan="5">ПІДСУМОК</td>
+        <td class="td-bonus" style="font-size:15px">${f2(r2(total))} ₴</td></tr>`;
+      return rows;
+    };
+
+    const buildSection = (users, title, role) => {
+      if (!users.length) return "";
+      let s = `<h2 class="sec-title">${title}</h2>`;
+      for (const u of users) {
+        const revPct = u.isBarman ? 0.013 : 0.0075;
+        let total = r2(u.revenue * revPct);
+        for (const ch of u.checks) for (const l of ch.lines) total=r2(total+l.amount*l.pct);
+        if (u.isBarman) total=r2(total+teaCoffeeRev*0.07+cocktailsRev*0.15+lemonadesRev*0.10);
+        s += `<div class="ublock">
+          <div class="uhead">
+            <span class="uname">${u.name}</span>
+            <span class="urole">${role}</span>
+            <span class="urev">Виторг: ${f0(u.revenue)} ₴</span>
+            <span class="utotal">Бонус: ${f2(r2(total))} ₴</span>
+          </div>
+          <div style="overflow-x:auto">
+          <table>
+            <thead><tr>
+              <th style="width:90px">Чек #</th>
+              <th style="width:55px">Час</th>
+              <th>Позиція</th>
+              <th class="td-r" style="width:110px">Ціна</th>
+              <th class="td-pct" style="width:55px">%</th>
+              <th class="td-bonus" style="width:100px">Бонус</th>
+            </tr></thead>
+            <tbody>${buildRows(u)}</tbody>
+          </table></div>
+        </div>`;
+      }
+      return s;
+    };
+
+    const page = `<!DOCTYPE html>
+<html lang="uk"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Бонуси — ${dateFrom}</title>
 <style>
-  body{font-family:monospace;background:#1a1a2e;color:#eee;padding:20px}
-  h1{color:#f0a500}h2{color:#00d4ff;margin-top:30px;border-bottom:1px solid #444;padding-bottom:5px}
-  .check{background:#16213e;border-left:3px solid #0f3460;margin:10px 0;padding:10px 15px;border-radius:4px}
-  .check-header{color:#aaa;font-size:12px;margin-bottom:6px}
-  .Соус{color:#1dd1a1}.Доп-кухня,.Мод-кухня{color:#ff9f43}.Доп-бар,.Мод-бар{color:#54a0ff}
-  .badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;margin-left:6px}
-  .check-total{margin-top:8px;padding-top:6px;border-top:1px dashed #444;font-size:13px;color:#f9ca24}
-  .user-total{background:#0f3460;padding:8px 15px;border-radius:4px;margin-top:5px;color:#f9ca24;font-weight:bold}
-  .topbar{display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
-  .btn{padding:8px 16px;border-radius:6px;font-size:13px;text-decoration:none;font-weight:bold;display:inline-block}
-  .btn-back{background:#444;color:#fff}.btn-csv{background:#27ae60;color:#fff}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#111827;color:#e5e7eb;padding:16px;font-size:14px}
+.topbar{display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
+.topbar h1{font-size:18px;color:#f59e0b;flex:1}
+.btn{padding:7px 14px;border-radius:6px;font-size:13px;text-decoration:none;font-weight:600;display:inline-block;border:none;cursor:pointer}
+.btn-back{background:#374151;color:#e5e7eb}.btn-csv{background:#059669;color:#fff}
+.sec-title{font-size:15px;font-weight:700;color:#93c5fd;border-bottom:1px solid #374151;padding-bottom:6px;margin:24px 0 10px}
+.ublock{background:#1f2937;border-radius:10px;border:1px solid #374151;margin-bottom:14px;overflow:hidden}
+.uhead{display:flex;align-items:center;gap:10px;padding:9px 14px;background:#111827;flex-wrap:wrap}
+.uname{font-size:14px;font-weight:700;color:#fff}
+.urole{font-size:11px;background:#374151;color:#9ca3af;padding:2px 7px;border-radius:999px}
+.urev{font-size:12px;color:#6b7280;margin-left:auto}
+.utotal{font-size:13px;font-weight:700;color:#34d399;background:#064e3b;padding:3px 10px;border-radius:999px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{text-align:left;padding:7px 10px;color:#9ca3af;font-weight:600;font-size:11px;background:#1a2332;border-bottom:1px solid #374151}
+tbody td{padding:6px 10px;border-bottom:1px solid #1a2332;vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+.td-check{color:#6b7280;font-size:12px;white-space:nowrap}
+.td-time{color:#6b7280;font-size:11px;white-space:nowrap}
+.td-r{text-align:right;white-space:nowrap;color:#d1d5db}
+.td-pct{text-align:right;white-space:nowrap;color:#9ca3af}
+.td-bonus{text-align:right;white-space:nowrap;font-weight:600;color:#34d399}
+.badge{font-size:10px;border:1px solid;border-radius:3px;padding:1px 4px;margin-left:5px;opacity:.85}
+.badge-shift{font-size:10px;background:#1e3a5f;color:#60a5fa;border-radius:3px;padding:1px 5px}
+.row-rev td{background:#162032}
+.row-rev .td-bonus{color:#fbbf24}
+.row-shared td{background:#1a1f2e}
+.row-total td{background:#064e3b;font-weight:700;color:#34d399}
 </style></head><body>
 <div class="topbar">
-  <h1 style="margin:0">🔥 Деталі допів — ${dateFrom}${dateFrom!==dateTo?" → "+dateTo:""}</h1>
+  <h1>💰 Бонуси — ${dateFrom}${dateFrom!==dateTo?" → "+dateTo:""}</h1>
   <a class="btn btn-back" href="/api/upsell-detail">← Назад</a>
-  <a class="btn btn-csv" href="/api/upsell-detail?dateFrom=${dateFrom}&dateTo=${dateTo}&format=csv">⬇ Скачати CSV</a>
-</div>`;
+  <a class="btn btn-csv" href="/api/upsell-detail?dateFrom=${dateFrom}&dateTo=${dateTo}&format=csv">⬇ CSV</a>
+</div>
+${buildSection(waiters,"👤 Офіціанти","Офіціант")}
+${buildSection(barmen,"🍸 Бармени","Бармен")}
+</body></html>`;
 
-    for (const u of sorted) {
-      html += `<h2>👤 ${u.name}</h2>`;
-      for (const ch of u.checks.sort((a,b)=>a.time.localeCompare(b.time))) {
-        html += `<div class="check"><div class="check-header">Чек #${ch.transaction_id} · ${ch.time}</div>`;
-        for (const line of ch.lines) {
-          const cls = line.type.replace(" ","-");
-          const qty = line.qty > 1 ? ` × ${line.qty}` : "";
-          html += `<div class="line"><span>${line.product}${qty}</span><span class="badge ${cls}">${line.type}</span> → <span class="${cls}">+${line.amount} ₴</span></div>`;
-        }
-        html += `<div class="check-total">`;
-        if (ch.sauces) html += `Соуси: ${round(ch.sauces)} ₴ &nbsp;`;
-        if (ch.kitchen) html += `Кухня: ${round(ch.kitchen)} ₴ &nbsp;`;
-        if (ch.bar) html += `Бар: ${round(ch.bar)} ₴ &nbsp;`;
-        html += `| <strong>Разом: ${ch.total} ₴</strong></div></div>`;
-      }
-      html += `<div class="user-total">Соуси: ${round(u.totals.sauces)} ₴ &nbsp;|&nbsp; Допи кух: ${round(u.totals.kitchen)} ₴ &nbsp;|&nbsp; Допи бар: ${round(u.totals.bar)} ₴ &nbsp;|&nbsp; <span style="color:#ff6b6b">РАЗОМ: ${round(u.totals.sum)} ₴</span></div>`;
-    }
-    html += `</body></html>`;
     res.setHeader("Content-Type","text/html; charset=utf-8");
-    res.send(html);
+    res.send(page);
 
   } catch (e) {
     console.error(e);
