@@ -321,7 +321,7 @@ export default function App() {
                       <th className="text-left py-2 text-xs font-medium w-2/6">Ім'я</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Виторг</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Соуси + доп</th>
-                      <th className="text-right py-2 text-xs font-medium w-1/6">Чай / Кофе</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6">Чай / Кава</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Алк. коктейлі</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Лимонади + Мохіто</th>
                     </tr>
