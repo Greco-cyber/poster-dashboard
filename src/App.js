@@ -217,13 +217,13 @@ export default function App() {
               </div>
               <div className="flex divide-x divide-gray-700">
                 {/* Ліво: категорії з крапками */}
-                <div className="flex-1 divide-y divide-gray-700/50">
+                <div className="flex-1 flex flex-col gap-1 p-2">
                   {(barData.categories || []).map((cat, i) => {
                     const colors = ["text-yellow-400","text-blue-400","text-yellow-400"];
                     return (
-                      <div key={cat.category_id} className="px-3 py-2.5 flex items-center justify-between gap-2">
+                      <div key={cat.category_id} className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-700/40 rounded-lg">
                         <div className="flex items-center gap-2">
-                          <span className={`text-lg leading-none ${colors[i] || "text-gray-400"}`}>●</span>
+                          <span className={`text-base leading-none ${colors[i] || "text-gray-400"}`}>●</span>
                           <span className="text-sm text-gray-200">{cat.name}</span>
                         </div>
                         <span className="text-sm font-bold text-white">{cat.qty} шт</span>
@@ -232,8 +232,8 @@ export default function App() {
                   })}
                 </div>
                 {/* Право: кава закладки */}
-                <div className="flex-1 divide-y divide-gray-700/50">
-                  <div className="px-3 py-2 flex items-start justify-between">
+                <div className="flex-1 flex flex-col gap-1 p-2">
+                  <div className="flex items-start justify-between px-3 py-2 bg-gray-700/40 rounded-lg">
                     <div>
                       <p className="text-sm font-semibold text-white">Зал</p>
                       <p className="text-xs text-gray-400">Кава у залі</p>
@@ -243,7 +243,7 @@ export default function App() {
                       <p className="text-xs text-gray-400">↳ {barData.coffee?.zal?.zakladki ?? 0} зак</p>
                     </div>
                   </div>
-                  <div className="px-3 py-2 flex items-start justify-between">
+                  <div className="flex items-start justify-between px-3 py-2 bg-gray-700/40 rounded-lg">
                     <div>
                       <p className="text-sm font-semibold text-white">Штат</p>
                       <p className="text-xs text-gray-400">Кава персонал</p>
@@ -253,7 +253,7 @@ export default function App() {
                       <p className="text-xs text-gray-400">↳ {barData.coffee?.shtat?.zakladki ?? 0} зак</p>
                     </div>
                   </div>
-                  <div className="px-3 py-2 flex items-start justify-between rounded-b-xl border border-blue-500/40 bg-blue-900/10 mx-2 mb-2 mt-1">
+                  <div className="flex items-start justify-between px-3 py-2 rounded-lg border border-blue-400/50 bg-blue-900/20">
                     <div>
                       <p className="text-sm font-bold text-white">Всього</p>
                       <p className="text-xs text-gray-400">↳ {barData.coffee?.total_zakladki ?? 0} закл.</p>
