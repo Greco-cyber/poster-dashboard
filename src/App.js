@@ -216,40 +216,51 @@ export default function App() {
                 <h2 className="text-sm font-bold text-white">🍺 Бар</h2>
               </div>
               <div className="flex divide-x divide-gray-700">
-                {/* Ліво: категорії */}
+                {/* Ліво: категорії з крапками */}
                 <div className="flex-1 divide-y divide-gray-700/50">
-                  {(barData.categories || []).map((cat) => (
-                    <div key={cat.category_id} className="px-3 py-2 flex items-center justify-between">
-                      <span className="text-sm text-gray-300">{cat.name}</span>
-                      <span className="text-sm font-bold text-white">{cat.qty} шт</span>
-                    </div>
-                  ))}
+                  {(barData.categories || []).map((cat, i) => {
+                    const colors = ["text-yellow-400","text-blue-400","text-yellow-400"];
+                    return (
+                      <div key={cat.category_id} className="px-3 py-2.5 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-lg leading-none ${colors[i] || "text-gray-400"}`}>●</span>
+                          <span className="text-sm text-gray-200">{cat.name}</span>
+                        </div>
+                        <span className="text-sm font-bold text-white">{cat.qty} шт</span>
+                      </div>
+                    );
+                  })}
                 </div>
                 {/* Право: кава закладки */}
                 <div className="flex-1 divide-y divide-gray-700/50">
-                  <div className="px-3 py-2">
-                    <p className="text-xs text-gray-400 font-medium">Зал</p>
-                    <p className="text-xs text-gray-500">Кава у залі</p>
-                    <p className="text-sm font-bold text-white mt-0.5">
-                      {barData.coffee?.zal?.qty ?? 0} шт
-                      <span className="text-gray-400 font-normal"> / {barData.coffee?.zal?.zakladki ?? 0} зак</span>
-                    </p>
+                  <div className="px-3 py-2 flex items-start justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Зал</p>
+                      <p className="text-xs text-gray-400">Кава у залі</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-white">{barData.coffee?.zal?.qty ?? 0} шт</p>
+                      <p className="text-xs text-gray-400">↳ {barData.coffee?.zal?.zakladki ?? 0} зак</p>
+                    </div>
                   </div>
-                  <div className="px-3 py-2">
-                    <p className="text-xs text-gray-400 font-medium">Штат</p>
-                    <p className="text-xs text-gray-500">Кава персонал</p>
-                    <p className="text-sm font-bold text-white mt-0.5">
-                      {barData.coffee?.shtat?.qty ?? 0} шт
-                      <span className="text-gray-400 font-normal"> / {barData.coffee?.shtat?.zakladki ?? 0} зак</span>
-                    </p>
+                  <div className="px-3 py-2 flex items-start justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Штат</p>
+                      <p className="text-xs text-gray-400">Кава персонал</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-white">{barData.coffee?.shtat?.qty ?? 0} шт</p>
+                      <p className="text-xs text-gray-400">↳ {barData.coffee?.shtat?.zakladki ?? 0} зак</p>
+                    </div>
                   </div>
-                  <div className="px-3 py-2 bg-gray-700/30">
-                    <p className="text-xs text-gray-400 font-medium">Всього</p>
-                    <p className="text-xs text-gray-500">{barData.coffee?.total_zakladki ?? 0} закл.</p>
-                    <p className="text-sm font-bold text-blue-300 mt-0.5">
-                      {barData.coffee?.total_qty ?? 0} шт
-                      <span className="text-gray-400 font-normal"> / {barData.coffee?.total_zakladki ?? 0} зак</span>
-                    </p>
+                  <div className="px-3 py-2 flex items-start justify-between rounded-b-xl border border-blue-500/40 bg-blue-900/10 mx-2 mb-2 mt-1">
+                    <div>
+                      <p className="text-sm font-bold text-white">Всього</p>
+                      <p className="text-xs text-gray-400">↳ {barData.coffee?.total_zakladki ?? 0} закл.</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-white">{barData.coffee?.total_qty ?? 0} шт</p>
+                    </div>
                   </div>
                 </div>
               </div>
