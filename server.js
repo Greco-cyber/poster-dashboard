@@ -616,7 +616,7 @@ function go(f){
     const closedTx = transactions.filter(tx => tx.status === "2" && Number(tx.payed_sum) > 0);
 
     const DESSERT_CATS_D = new Set([32]);
-    const WINE_CATS_D    = new Set([22,23,25,26,30,39]);
+    const WINE_CATS_D    = new Set([22,23,24,25,26,30,39]);
     const COCKTAIL_CAT_D = new Set([34]);
 
     // uid -> { name, isBarman, revenue, checks: [{ tx_id, time, lines:[{product,qty,amount,pct,type}] }] }
@@ -920,7 +920,7 @@ ${buildSection(barmen,"🍸 Бармени","Бармен")}
 
 // -------------------- WAITERS BONUS DATA --------------------
 const DESSERT_CATS  = new Set([32]);
-const WINE_CATS     = new Set([22, 23, 25, 26, 30, 39]);
+const WINE_CATS     = new Set([22, 23, 24, 25, 26, 30, 39]);
 const COCKTAIL_CATS = new Set([34]);
 
 async function calcWaitersBonusData(dateFrom, dateTo) {
