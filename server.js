@@ -427,7 +427,7 @@ async function calcUpsellForPeriod(dateFrom, dateTo) {
               if (fullExact.workshop === 1) { txBar += amount; }
               else { txKitchen += amount; }
             } else {
-              const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
+              const parts = rawMod.split(/,\s*\+/).map(s => s.replace(/^\+/,"").trim()).filter(s => s.length > 3);
               for (const part of parts) {
                 const { name: partName, qty: modQty } = parseModPart(part);
                 const partQty = modQty > 1 ? modQty : num;
@@ -676,7 +676,7 @@ function go(f){
 
             // Модифікатори
             if (modId !== "0") {
-              if (payed % 100 !== 0) continue; // промо, пропускаємо
+              if (payed === 0 || payed % 100 !== 0) continue; // безкоштовний або промо — пропускаємо
               const rawMod = String(p.modificator_name || "");
               const { name: rName, qty: rQty } = parseModPart(rawMod);
               const effQty = rQty > 1 ? rQty : num;
@@ -686,7 +686,7 @@ function go(f){
                 const a = Math.round(fullExact.price * effQty * 100) / 100;
                 lines.push({ product: rName, qty: effQty, amount: a, pct: upsellPct, type: fullExact.workshop===1?"Мод бар":"Мод кухня" });
               } else {
-                for (const part of rawMod.split("+").map(s=>s.trim()).filter(s=>s.length>3)) {
+                for (const part of rawMod.split(/,\s*\+/).map(s=>s.replace(/^\+/,"").trim()).filter(s=>s.length>3)) {
                   const { name: pN, qty: pQ } = parseModPart(part);
                   const pQty = pQ > 1 ? pQ : num;
                   const mInfo = findModByName(pN, MOD_PRICES);
@@ -965,7 +965,7 @@ async function calcWaitersBonusData(dateFrom, dateTo) {
           } else if (catId === 41) {
             txBar += payedSum / 100;
           } else if (modId !== "0") {
-            if (payedSum % 100 !== 0) continue;
+            if (payedSum === 0 || payedSum % 100 !== 0) continue;
             const rawMod = String(p.modificator_name || "");
             const { name: rawModName, qty: rawModQty } = parseModPart(rawMod);
             const effectiveQty = rawModQty > 1 ? rawModQty : num;
@@ -975,7 +975,7 @@ async function calcWaitersBonusData(dateFrom, dateTo) {
               const amount = fullExact.price * effectiveQty;
               if (fullExact.workshop === 1) txBar += amount; else txKitchen += amount;
             } else {
-              const parts = rawMod.split("+").map(s => s.trim()).filter(s => s.length > 3);
+              const parts = rawMod.split(/,\s*\+/).map(s => s.replace(/^\+/,"").trim()).filter(s => s.length > 3);
               for (const part of parts) {
                 const { name: partName, qty: modQty } = parseModPart(part);
                 const partQty = modQty > 1 ? modQty : num;
