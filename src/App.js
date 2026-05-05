@@ -209,64 +209,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* БАР */}
-          {barData && (
-            <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
-              <div className="px-3 py-2 border-b border-gray-700">
-                <h2 className="text-sm font-bold text-white">🍺 Бар</h2>
-              </div>
-              <div className="flex divide-x divide-gray-700">
-                {/* Ліво: категорії з крапками */}
-                <div className="flex-1 flex flex-col gap-1 p-2">
-                  {(barData.categories || []).map((cat, i) => {
-                    const colors = ["text-yellow-400","text-blue-400","text-yellow-400"];
-                    return (
-                      <div key={cat.category_id} className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-700/40 rounded-lg">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-base leading-none ${colors[i] || "text-gray-400"}`}>●</span>
-                          <span className="text-sm text-gray-200">{cat.name}</span>
-                        </div>
-                        <span className="text-sm font-bold text-white">{cat.qty} шт</span>
-                      </div>
-                    );
-                  })}
-                </div>
-                {/* Право: кава закладки */}
-                <div className="flex-1 flex flex-col gap-1 p-2">
-                  <div className="flex items-start justify-between px-3 py-2 bg-gray-700/40 rounded-lg">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Зал</p>
-                      <p className="text-xs text-gray-400">Кава у залі</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-white">{barData.coffee?.zal?.qty ?? 0} шт</p>
-                      <p className="text-xs text-gray-400">↳ {barData.coffee?.zal?.zakladki ?? 0} зак</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start justify-between px-3 py-2 bg-gray-700/40 rounded-lg">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Штат</p>
-                      <p className="text-xs text-gray-400">Кава персонал</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-white">{barData.coffee?.shtat?.qty ?? 0} шт</p>
-                      <p className="text-xs text-gray-400">↳ {barData.coffee?.shtat?.zakladki ?? 0} зак</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start justify-between px-3 py-2 rounded-lg border border-blue-400/50 bg-blue-900/20">
-                    <div>
-                      <p className="text-sm font-bold text-white">Всього</p>
-                      <p className="text-xs text-gray-400">↳ {barData.coffee?.total_zakladki ?? 0} закл.</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-white">{barData.coffee?.total_qty ?? 0} шт</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* БОНУС ОФІЦІАНТІВ */}
           <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
             <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
@@ -286,10 +228,13 @@ export default function App() {
                       <th className="text-right py-2 text-xs font-medium w-1/6">Десерти</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Вино</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Алк. коктейлі</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6 text-yellow-400">Разом</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/40">
-                    {waitersTable.map((row) => (
+                    {waitersTable.map((row) => {
+                      const total = (row.revenue_bonus||0)+(row.upsell_bonus||0)+(row.desserts_bonus||0)+(row.wines_bonus||0)+(row.cocktails_bonus||0);
+                      return (
                       <tr key={row.user_id} className="hover:bg-gray-700/20">
                         <td className="py-3 text-sm font-semibold text-white">{row.name||"—"}</td>
                         <td className="py-3 text-right text-sm font-bold text-white">{money(row.revenue_bonus)} ₴</td>
@@ -297,8 +242,10 @@ export default function App() {
                         <td className="py-3 text-right text-sm font-bold text-pink-300">{money(row.desserts_bonus)} ₴</td>
                         <td className="py-3 text-right text-sm font-bold text-purple-300">{money(row.wines_bonus)} ₴</td>
                         <td className="py-3 text-right text-sm font-bold text-orange-300">{money(row.cocktails_bonus)} ₴</td>
+                        <td className="py-3 text-right text-sm font-bold text-yellow-300">{money(total)} ₴</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -324,10 +271,13 @@ export default function App() {
                       <th className="text-right py-2 text-xs font-medium w-1/6">Чай / Кава</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Алк. коктейлі</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Лимонади + Мохіто</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6 text-yellow-400">Разом</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/40">
-                    {barmenBonus.map((row) => (
+                    {barmenBonus.map((row) => {
+                      const total = (row.revenue_bonus||0)+(row.upsell_bonus||0)+(row.tea_coffee_share||0)+(row.cocktails_share||0)+(row.lemonades_share||0);
+                      return (
                       <tr key={row.user_id} className="hover:bg-gray-700/20">
                         <td className="py-3 text-sm font-semibold text-white">{row.name||"—"}</td>
                         <td className="py-3 text-right text-sm font-bold text-white">{money(row.revenue_bonus)} ₴</td>
@@ -335,13 +285,47 @@ export default function App() {
                         <td className="py-3 text-right text-sm font-bold text-blue-300">{money(row.tea_coffee_share)} ₴</td>
                         <td className="py-3 text-right text-sm font-bold text-purple-300">{money(row.cocktails_share)} ₴</td>
                         <td className="py-3 text-right text-sm font-bold text-green-300">{money(row.lemonades_share)} ₴</td>
+                        <td className="py-3 text-right text-sm font-bold text-yellow-300">{money(total)} ₴</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
             </div>
           </div>
+
+          {/* БАР — кава */}
+          {barData && (
+            <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
+              <div className="px-3 py-2 border-b border-gray-700">
+                <h2 className="text-sm font-bold text-white">☕ Кава</h2>
+              </div>
+              <div className="flex gap-2 p-2">
+                <div className="flex-1 flex items-center justify-between px-3 py-2 bg-gray-700/40 rounded-lg">
+                  <p className="text-xs text-gray-400">Кава в закладі</p>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-white">{barData.coffee?.zal?.qty ?? 0} шт</p>
+                    <p className="text-xs text-gray-500">{barData.coffee?.zal?.zakladki ?? 0} зак</p>
+                  </div>
+                </div>
+                <div className="flex-1 flex items-center justify-between px-3 py-2 bg-gray-700/40 rounded-lg">
+                  <p className="text-xs text-gray-400">Кава штат</p>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-white">{barData.coffee?.shtat?.qty ?? 0} шт</p>
+                    <p className="text-xs text-gray-500">{barData.coffee?.shtat?.zakladki ?? 0} зак</p>
+                  </div>
+                </div>
+                <div className="flex-1 flex items-center justify-between px-3 py-2 rounded-lg border border-blue-400/50 bg-blue-900/20">
+                  <p className="text-xs text-gray-400">Усього</p>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-white">{barData.coffee?.total_qty ?? 0} шт</p>
+                    <p className="text-xs text-gray-500">{barData.coffee?.total_zakladki ?? 0} закл</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
         </div>
       )}
