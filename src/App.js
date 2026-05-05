@@ -125,21 +125,23 @@ export default function App() {
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
 
       {/* HEADER */}
-      <div className="bg-gray-800 border-b border-gray-700 px-3 py-2 flex items-center justify-between shrink-0">
-        <div>
-          <p className="text-sm font-bold text-white">GRECO · Зміна</p>
-          <p className="text-gray-400 text-xs">{dateInputValue(date)}</p>
+      <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-8 bg-blue-500 rounded-full"/>
+          <div>
+            <p className="text-sm font-bold text-white tracking-wide">GRECO</p>
+            <p className="text-gray-400 text-xs">Зміна · {dateInputValue(date)}</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <Clock className="w-3.5 h-3.5 text-blue-400" />
           <input
             type="date"
-            className="px-2 py-1 border border-gray-600 rounded text-xs text-white bg-gray-700 focus:outline-none"
+            className="px-2 py-1.5 border border-gray-600 rounded-lg text-xs text-white bg-gray-700/80 focus:outline-none focus:border-blue-500"
             value={dateInputValue(date)}
             onChange={(e) => setDate(e.target.value.replaceAll("-",""))}
           />
           <button onClick={loadAll} disabled={isLoading}
-            className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-500 disabled:opacity-50 transition-colors">
             <RefreshCw className={`w-3 h-3 ${isLoading?"animate-spin":""}`} />
             {isLoading ? "..." : "Оновити"}
           </button>
@@ -154,13 +156,13 @@ export default function App() {
           {/* ТОТАЛИ */}
           <div className="grid grid-cols-3 gap-2 shrink-0">
             {[
-              { label:"Виручка", val:`${money(totals.rev)} ₴`, color:"text-green-400" },
-              { label:"Чеки", val:totals.ch, color:"text-blue-400" },
-              { label:"Серед. чек", val:`${money(totals.avg)} ₴`, color:"text-purple-400" },
+              { label:"Виручка", val:`${money(totals.rev)} ₴`, color:"text-green-400", border:"border-t-2 border-green-500/60" },
+              { label:"Чеки", val:totals.ch, color:"text-blue-400", border:"border-t-2 border-blue-500/60" },
+              { label:"Серед. чек", val:`${money(totals.avg)} ₴`, color:"text-purple-400", border:"border-t-2 border-purple-500/60" },
             ].map((t) => (
-              <div key={t.label} className="bg-gray-800 rounded-xl border border-gray-700 px-3 py-2 text-center">
-                <p className="text-gray-400 text-xs mb-0.5">{t.label}</p>
-                <p className={`text-lg font-bold ${t.color}`}>{t.val}</p>
+              <div key={t.label} className={`bg-gray-800 rounded-xl border border-gray-700 ${t.border} px-3 py-3 text-center`}>
+                <p className="text-gray-400 text-xs mb-1">{t.label}</p>
+                <p className={`text-xl font-bold ${t.color}`}>{t.val}</p>
               </div>
             ))}
           </div>
@@ -183,7 +185,9 @@ export default function App() {
                     <div key={w.user_id} className="px-3 py-2.5 flex items-center gap-3">
                       <div className="w-24 shrink-0">
                         <p className="text-sm font-semibold text-white truncate">{w.name||"—"}</p>
-                        <p className="text-xs text-gray-400">{isBar?"Бармен":"Офіціант"}</p>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${isBar?"bg-purple-900/60 text-purple-300":"bg-blue-900/60 text-blue-300"}`}>
+                          {isBar?"🍸 Бармен":"🧾 Офіціант"}
+                        </span>
                       </div>
                       <div className="flex-1 grid grid-cols-4 gap-1 text-center">
                         <div>
@@ -212,7 +216,10 @@ export default function App() {
           {/* БОНУС ОФІЦІАНТІВ */}
           <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
             <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-              <h2 className="text-base font-bold text-white">🧾 Бонус офіціантів</h2>
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-5 bg-blue-400 rounded-full"/>
+                <h2 className="text-sm font-bold text-white">Бонус офіціантів</h2>
+              </div>
               {waitersLoading && <span className="text-xs text-gray-500 animate-pulse">завантаження...</span>}
             </div>
             <div className="px-4 py-2">
@@ -232,17 +239,17 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/40">
-                    {waitersTable.map((row) => {
+                    {waitersTable.map((row, i) => {
                       const total = (row.revenue_bonus||0)+(row.upsell_bonus||0)+(row.desserts_bonus||0)+(row.wines_bonus||0)+(row.cocktails_bonus||0);
                       return (
-                      <tr key={row.user_id} className="hover:bg-gray-700/20">
-                        <td className="py-3 text-sm font-semibold text-white">{row.name||"—"}</td>
-                        <td className="py-3 text-right text-sm font-bold text-white">{money(row.revenue_bonus)} ₴</td>
-                        <td className="py-3 text-right text-sm font-bold text-white">{money(row.upsell_bonus)} ₴</td>
-                        <td className="py-3 text-right text-sm font-bold text-pink-300">{money(row.desserts_bonus)} ₴</td>
-                        <td className="py-3 text-right text-sm font-bold text-purple-300">{money(row.wines_bonus)} ₴</td>
-                        <td className="py-3 text-right text-sm font-bold text-orange-300">{money(row.cocktails_bonus)} ₴</td>
-                        <td className="py-3 text-right text-sm font-bold text-yellow-300">{money(total)} ₴</td>
+                      <tr key={row.user_id} className={`transition-colors hover:bg-blue-900/10 ${i%2===0?"":"bg-gray-700/10"}`}>
+                        <td className="py-2.5 text-sm font-semibold text-white">{row.name||"—"}</td>
+                        <td className="py-2.5 text-right text-sm text-gray-200">{money(row.revenue_bonus)} ₴</td>
+                        <td className="py-2.5 text-right text-sm text-gray-200">{money(row.upsell_bonus)} ₴</td>
+                        <td className="py-2.5 text-right text-sm text-pink-300">{money(row.desserts_bonus)} ₴</td>
+                        <td className="py-2.5 text-right text-sm text-purple-300">{money(row.wines_bonus)} ₴</td>
+                        <td className="py-2.5 text-right text-sm text-orange-300">{money(row.cocktails_bonus)} ₴</td>
+                        <td className="py-2.5 text-right text-sm font-bold text-yellow-300">{money(total)} ₴</td>
                       </tr>
                       );
                     })}
@@ -255,7 +262,10 @@ export default function App() {
           {/* БОНУС БАРМЕНІВ */}
           <div className="bg-gray-800 rounded-xl border border-gray-700 shrink-0">
             <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-              <h2 className="text-base font-bold text-white">🍸 Бонус барменів</h2>
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-5 bg-purple-400 rounded-full"/>
+                <h2 className="text-sm font-bold text-white">Бонус барменів</h2>
+              </div>
               {bonusLoading && <span className="text-xs text-gray-500 animate-pulse">завантаження...</span>}
             </div>
             <div className="px-4 py-2">
@@ -275,17 +285,17 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/40">
-                    {barmenBonus.map((row) => {
+                    {barmenBonus.map((row, i) => {
                       const total = (row.revenue_bonus||0)+(row.upsell_bonus||0)+(row.tea_coffee_share||0)+(row.cocktails_share||0)+(row.lemonades_share||0);
                       return (
-                      <tr key={row.user_id} className="hover:bg-gray-700/20">
-                        <td className="py-3 text-sm font-semibold text-white">{row.name||"—"}</td>
-                        <td className="py-3 text-right text-sm font-bold text-white">{money(row.revenue_bonus)} ₴</td>
-                        <td className="py-3 text-right text-sm font-bold text-white">{money(row.upsell_bonus)} ₴</td>
-                        <td className="py-3 text-right text-sm font-bold text-blue-300">{money(row.tea_coffee_share)} ₴</td>
-                        <td className="py-3 text-right text-sm font-bold text-purple-300">{money(row.cocktails_share)} ₴</td>
-                        <td className="py-3 text-right text-sm font-bold text-green-300">{money(row.lemonades_share)} ₴</td>
-                        <td className="py-3 text-right text-sm font-bold text-yellow-300">{money(total)} ₴</td>
+                      <tr key={row.user_id} className={`transition-colors hover:bg-purple-900/10 ${i%2===0?"":"bg-gray-700/10"}`}>
+                        <td className="py-2.5 text-sm font-semibold text-white">{row.name||"—"}</td>
+                        <td className="py-2.5 text-right text-sm text-gray-200">{money(row.revenue_bonus)} ₴</td>
+                        <td className="py-2.5 text-right text-sm text-gray-200">{money(row.upsell_bonus)} ₴</td>
+                        <td className="py-2.5 text-right text-sm text-blue-300">{money(row.tea_coffee_share)} ₴</td>
+                        <td className="py-2.5 text-right text-sm text-purple-300">{money(row.cocktails_share)} ₴</td>
+                        <td className="py-2.5 text-right text-sm text-green-300">{money(row.lemonades_share)} ₴</td>
+                        <td className="py-2.5 text-right text-sm font-bold text-yellow-300">{money(total)} ₴</td>
                       </tr>
                       );
                     })}
