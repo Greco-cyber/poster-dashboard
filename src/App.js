@@ -33,6 +33,10 @@ export default function App() {
   const [barmenBonus, setBarmenBonus] = useState([]);
   const [bonusCategories, setBonusCategories] = useState(null);
   const [barData, setBarData] = useState(null);
+  const [monthRevSales, setMonthRevSales] = useState([]);
+  const [monthUpsellData, setMonthUpsellData] = useState([]);
+  const [monthWaitersBonus, setMonthWaitersBonus] = useState([]);
+  const [monthBarmenBonus, setMonthBarmenBonus] = useState([]);
 
   const fetchJson = useCallback(async (url) => {
     const r = await fetch(url);
@@ -84,6 +88,21 @@ export default function App() {
       setBarData(dBar || null);
     } catch(e) { setBarData(null); }
 
+    // Місячні дані для накопичувального бонусу
+    try {
+      const mFrom = firstDayOfMonthStr(date);
+      const [dMRev, dMUp, dMWB, dMBB] = await Promise.all([
+        fetchJson(`${API_BASE}/api/waiters-sales?dateFrom=${mFrom}&dateTo=${date}`),
+        fetchJson(`${API_BASE}/api/upsell-sales?dateFrom=${mFrom}&dateTo=${date}`),
+        fetchJson(`${API_BASE}/api/waiters-bonus?dateFrom=${mFrom}&dateTo=${date}`),
+        fetchJson(`${API_BASE}/api/barmen-bonus?dateFrom=${mFrom}&dateTo=${date}`),
+      ]);
+      setMonthRevSales(Array.isArray(dMRev?.response) ? dMRev.response : []);
+      setMonthUpsellData(Array.isArray(dMUp?.response) ? dMUp.response : []);
+      setMonthWaitersBonus(Array.isArray(dMWB?.response) ? dMWB.response : []);
+      setMonthBarmenBonus(Array.isArray(dMBB?.response) ? dMBB.response : []);
+    } catch(e) { setMonthRevSales([]); setMonthUpsellData([]); setMonthWaitersBonus([]); setMonthBarmenBonus([]); }
+
   }, [date, fetchJson]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -96,6 +115,29 @@ export default function App() {
   }, [daySales]);
 
   const isBarName = (name) => { const n = (name || "").toLowerCase(); return n.includes("бар") || n.includes("bar"); };
+
+  const waitersMonthMap = useMemo(() => {
+    const map = {};
+    for (const w of monthRevSales) {
+      if (isBarName(w.name)) continue;
+      const uid = String(w.user_id);
+      const rev = Number(w.revenue||0)/100;
+      const up = monthUpsellData.find(u => String(u.user_id) === uid);
+      const upsellSum = up ? (up.day_sauces||0)+(up.day_kitchen||0)+(up.day_bar||0) : 0;
+      const wb = monthWaitersBonus.find(b => String(b.user_id) === uid);
+      map[uid] = Math.round((rev*0.0075 + upsellSum*0.10 + (wb?.desserts_bonus||0) + (wb?.wines_bonus||0) + (wb?.cocktails_bonus||0))*100)/100;
+    }
+    return map;
+  }, [monthRevSales, monthUpsellData, monthWaitersBonus]);
+
+  const barmenMonthMap = useMemo(() => {
+    const map = {};
+    for (const b of monthBarmenBonus) {
+      const uid = String(b.user_id);
+      map[uid] = Math.round(((b.revenue_bonus||0)+(b.upsell_bonus||0)+(b.tea_coffee_share||0)+(b.cocktails_share||0)+(b.lemonades_share||0))*100)/100;
+    }
+    return map;
+  }, [monthBarmenBonus]);
 
   const waitersTable = useMemo(() => {
     return daySales
@@ -236,6 +278,7 @@ export default function App() {
                       <th className="text-right py-2 text-xs font-medium w-1/6">Вино</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Алк. коктейлі</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6 text-yellow-400">Разом</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6 text-emerald-400">За місяць</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/40">
@@ -250,6 +293,7 @@ export default function App() {
                         <td className="py-2.5 text-right text-sm text-purple-300">{money(row.wines_bonus)} ₴</td>
                         <td className="py-2.5 text-right text-sm text-orange-300">{money(row.cocktails_bonus)} ₴</td>
                         <td className="py-2.5 text-right text-sm font-bold text-yellow-300">{money(total)} ₴</td>
+                        <td className="py-2.5 text-right text-sm font-bold text-emerald-400">{money(waitersMonthMap[row.user_id]||0)} ₴</td>
                       </tr>
                       );
                     })}
@@ -282,6 +326,7 @@ export default function App() {
                       <th className="text-right py-2 text-xs font-medium w-1/6">Алк. коктейлі</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Лимонади + Мохіто</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6 text-yellow-400">Разом</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6 text-emerald-400">За місяць</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/40">
@@ -296,6 +341,7 @@ export default function App() {
                         <td className="py-2.5 text-right text-sm text-purple-300">{money(row.cocktails_share)} ₴</td>
                         <td className="py-2.5 text-right text-sm text-green-300">{money(row.lemonades_share)} ₴</td>
                         <td className="py-2.5 text-right text-sm font-bold text-yellow-300">{money(total)} ₴</td>
+                        <td className="py-2.5 text-right text-sm font-bold text-emerald-400">{money(barmenMonthMap[row.user_id]||0)} ₴</td>
                       </tr>
                       );
                     })}
