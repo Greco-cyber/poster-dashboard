@@ -36,7 +36,7 @@ export default function App() {
   const [monthRevSales, setMonthRevSales] = useState([]);
   const [monthUpsellData, setMonthUpsellData] = useState([]);
   const [monthWaitersBonus, setMonthWaitersBonus] = useState([]);
-  const [monthBarmenBonus, setMonthBarmenBonus] = useState([]);
+  const [monthTotals, setMonthTotals] = useState([]);
 
   const fetchJson = useCallback(async (url) => {
     const r = await fetch(url);
@@ -91,17 +91,17 @@ export default function App() {
     // Місячні дані для накопичувального бонусу
     try {
       const mFrom = firstDayOfMonthStr(date);
-      const [dMRev, dMUp, dMWB, dMBB] = await Promise.all([
+      const [dMRev, dMUp, dMWB, dMT] = await Promise.all([
         fetchJson(`${API_BASE}/api/waiters-sales?dateFrom=${mFrom}&dateTo=${date}`),
         fetchJson(`${API_BASE}/api/upsell-sales?dateFrom=${mFrom}&dateTo=${date}`),
         fetchJson(`${API_BASE}/api/waiters-bonus?dateFrom=${mFrom}&dateTo=${date}`),
-        fetchJson(`${API_BASE}/api/barmen-bonus?dateFrom=${mFrom}&dateTo=${date}`),
+        fetchJson(`${API_BASE}/api/monthly-totals?dateFrom=${date}`),
       ]);
       setMonthRevSales(Array.isArray(dMRev?.response) ? dMRev.response : []);
       setMonthUpsellData(Array.isArray(dMUp?.response) ? dMUp.response : []);
       setMonthWaitersBonus(Array.isArray(dMWB?.response) ? dMWB.response : []);
-      setMonthBarmenBonus(Array.isArray(dMBB?.response) ? dMBB.response : []);
-    } catch(e) { setMonthRevSales([]); setMonthUpsellData([]); setMonthWaitersBonus([]); setMonthBarmenBonus([]); }
+      setMonthTotals(Array.isArray(dMT?.response) ? dMT.response : []);
+    } catch(e) { setMonthRevSales([]); setMonthUpsellData([]); setMonthWaitersBonus([]); setMonthTotals([]); }
 
   }, [date, fetchJson]);
 
@@ -118,26 +118,19 @@ export default function App() {
 
   const waitersMonthMap = useMemo(() => {
     const map = {};
-    for (const w of monthRevSales) {
-      if (isBarName(w.name)) continue;
-      const uid = String(w.user_id);
-      const rev = Number(w.revenue||0)/100;
-      const up = monthUpsellData.find(u => String(u.user_id) === uid);
-      const upsellSum = up ? (up.day_sauces||0)+(up.day_kitchen||0)+(up.day_bar||0) : 0;
-      const wb = monthWaitersBonus.find(b => String(b.user_id) === uid);
-      map[uid] = Math.round((rev*0.0075 + upsellSum*0.10 + (wb?.desserts_bonus||0) + (wb?.wines_bonus||0) + (wb?.cocktails_bonus||0))*100)/100;
+    for (const b of monthTotals) {
+      map[String(b.user_id)] = b.monthly_total || 0;
     }
     return map;
-  }, [monthRevSales, monthUpsellData, monthWaitersBonus]);
+  }, [monthTotals]);
 
   const barmenMonthMap = useMemo(() => {
     const map = {};
-    for (const b of monthBarmenBonus) {
-      const uid = String(b.user_id);
-      map[uid] = Math.round(((b.revenue_bonus||0)+(b.upsell_bonus||0)+(b.tea_coffee_share||0)+(b.cocktails_share||0)+(b.lemonades_share||0))*100)/100;
+    for (const b of monthTotals) {
+      map[String(b.user_id)] = b.monthly_total || 0;
     }
     return map;
-  }, [monthBarmenBonus]);
+  }, [monthTotals]);
 
   const waitersTable = useMemo(() => {
     return daySales
