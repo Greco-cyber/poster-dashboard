@@ -1174,6 +1174,119 @@ app.get("/api/debug-cat", async (req, res) => {
 });
 
 // -------------------- MONTHLY BONUS REPORT --------------------
+const MONTHLY_CACHE = new Map(); // month -> { status:'computing'|'done'|'error', data, startedAt, computedAt, error }
+const MONTHLY_TTL_MS = 20 * 60 * 1000; // 20 хвилин
+
+async function computeMonthlyBonus(month) {
+  const todayStr = todayYYYYMMDD();
+  const dateFrom = month + "01";
+  const y = +month.slice(0,4), m = +month.slice(4,6);
+  const lastDay = new Date(y, m, 0).getDate();
+  const lastDateStr = month + String(lastDay).padStart(2,"0");
+  const dateTo = lastDateStr <= todayStr ? lastDateStr : todayStr;
+
+  const isBarman = (name) => { const n = String(name||"").toLowerCase(); return n.includes("бар")||n.includes("bar"); };
+  await ensureModPrices();
+
+  const DESSERT_CATS = new Set([32]);
+  const WINE_CATS    = new Set([22,23,24,25,26,30,39]);
+  const COCKTAIL_CAT = new Set([34]);
+
+  const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
+  const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
+  const closedTx = transactions.filter(tx => tx.status==="2" && Number(tx.payed_sum)>0);
+
+  const userInfo = new Map();
+  const dayMap = new Map();
+  const getKey = (uid, d) => `${uid}_${d}`;
+  const getEntry = (uid, d) => {
+    const k = getKey(uid, d);
+    if (!dayMap.has(k)) dayMap.set(k, { upsell:0, cats:0, revenue:0 });
+    return dayMap.get(k);
+  };
+
+  const BATCH = 10;
+  for (let i = 0; i < closedTx.length; i += BATCH) {
+    const batch = closedTx.slice(i, i + BATCH);
+    await Promise.all(batch.map(async (tx) => {
+      const uid = String(tx.user_id);
+      const name = String(tx.name || "");
+      const txIsBar = isBarman(name);
+      const txId = String(tx.transaction_id);
+      const rawDate = String(tx.date_close_date || tx.date_close || "");
+      const dateStr = rawDate.slice(0,10).replace(/-/g,"");
+      if (!dateStr || dateStr.length < 8) return;
+      if (!userInfo.has(uid)) userInfo.set(uid, { name, isBarman: txIsBar });
+      const payed_sum = Number(tx.payed_sum||0)/100;
+      const revPct = txIsBar ? 0.013 : 0.0075;
+      getEntry(uid, dateStr).revenue += payed_sum * revPct;
+      try {
+        const prodResp = await poster("dash.getTransactionProducts", { transaction_id: txId });
+        const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
+        const upsellPct = txIsBar ? 0.07 : 0.10;
+        const e = getEntry(uid, dateStr);
+        for (const p of products) {
+          const catId = Number(p.category_id);
+          const modId = String(p.modification_id||"0");
+          const num   = Number(p.num||1);
+          const payed = Number(p.payed_sum||0);
+          if (catId===17||catId===37||catId===41) { if (payed/100>0) e.upsell += (payed/100)*upsellPct; continue; }
+          if (!txIsBar) {
+            if (DESSERT_CATS.has(catId)) { e.cats += (payed/100)*0.05; continue; }
+            if (WINE_CATS.has(catId))    { e.cats += (payed/100)*0.05; continue; }
+            if (COCKTAIL_CAT.has(catId)) { e.cats += (payed/100)*0.05; continue; }
+          }
+          if (modId!=="0") {
+            if (payed===0||payed%100!==0) continue;
+            const rawMod = String(p.modificator_name||"");
+            const { name: rName, qty: rQty } = parseModPart(rawMod);
+            const effQty = rQty>1?rQty:num;
+            const exact = MOD_PRICES.get(normalizeName(rName));
+            if (exact && exact.price>0) { e.upsell += exact.price*effQty*upsellPct; }
+            else {
+              for (const part of rawMod.split(/,\s*\+/).map(s=>s.replace(/^\+/,"").trim()).filter(s=>s.length>3)) {
+                const { name: pN, qty: pQ } = parseModPart(part);
+                const mInfo = findModByName(pN, MOD_PRICES);
+                if (mInfo && mInfo.price>0) e.upsell += mInfo.price*(pQ>1?pQ:num)*upsellPct;
+              }
+            }
+          }
+        }
+      } catch(e) { /* skip */ }
+    }));
+  }
+
+  // Shared barmen per day
+  const uniqueDates = [...new Set(closedTx.map(tx => String(tx.date_close_date||tx.date_close||"").slice(0,10).replace(/-/g,"")))].filter(d=>d.length>=8).sort();
+  const barmenUids = [...userInfo.entries()].filter(([,v])=>v.isBarman).map(([uid])=>uid);
+  const barmenCountPerDay = new Map();
+  for (const uid of barmenUids) {
+    for (const d of uniqueDates) {
+      const worked = closedTx.some(tx => String(tx.user_id)===uid && String(tx.date_close_date||tx.date_close||"").slice(0,10).replace(/-/g,"")=== d);
+      if (worked) barmenCountPerDay.set(d, (barmenCountPerDay.get(d)||0)+1);
+    }
+  }
+  for (const d of uniqueDates) {
+    try {
+      const catsResp = await poster("dash.getCategoriesSales", { dateFrom: d, dateTo: d });
+      const catsArr = Array.isArray(catsResp?.response) ? catsResp.response : [];
+      const catRev = new Map();
+      for (const x of catsArr) catRev.set(Number(x.category_id), Number(x.revenue??x.sales_sum??x.sum??x.payed_sum??0)/100);
+      const teaCoffee = catRev.get(28)||0;
+      const cocktails = catRev.get(34)||0;
+      const lemonades = [48,49,50].reduce((s,id)=>s+(catRev.get(id)||0),0);
+      const totalShared = teaCoffee*0.07 + cocktails*0.15 + lemonades*0.10;
+      const cnt = Math.max(barmenCountPerDay.get(d)||1, 1);
+      for (const uid of barmenUids) {
+        const worked = closedTx.some(tx => String(tx.user_id)===uid && String(tx.date_close_date||tx.date_close||"").slice(0,10).replace(/-/g,"")=== d);
+        if (worked) getEntry(uid, d).cats += totalShared/cnt;
+      }
+    } catch(e) { /* skip */ }
+  }
+
+  return { userInfo, dayMap, dateFrom, dateTo };
+}
+
 app.get("/monthly-bonus", async (req, res) => {
   try {
     if (!TOKEN) return res.status(500).send("No token");
@@ -1182,198 +1295,111 @@ app.get("/monthly-bonus", async (req, res) => {
     let { month } = req.query;
     if (!month) month = todayStr.slice(0, 6);
 
-    const dateFrom = month + "01";
-    const y = +month.slice(0,4), m = +month.slice(4,6);
-    const lastDay = new Date(y, m, 0).getDate();
-    const lastDateStr = month + String(lastDay).padStart(2,"0");
-    const dateTo = lastDateStr <= todayStr ? lastDateStr : todayStr;
-
     const fmtDisp = (yyyymmdd) => `${yyyymmdd.slice(6,8)}.${yyyymmdd.slice(4,6)}`;
     const f2 = (n) => Number(n).toFixed(2);
-    const isBarman = (name) => { const n = String(name||"").toLowerCase(); return n.includes("бар")||n.includes("bar"); };
 
-    await ensureModPrices();
-
-    const DESSERT_CATS = new Set([32]);
-    const WINE_CATS    = new Set([22,23,24,25,26,30,39]);
-    const COCKTAIL_CAT = new Set([34]);
-
-    // 1. Транзакції за місяць
-    const txResp = await poster("dash.getTransactions", { dateFrom, dateTo });
-    const transactions = Array.isArray(txResp?.response) ? txResp.response : [];
-    const closedTx = transactions.filter(tx => tx.status==="2" && Number(tx.payed_sum)>0);
-
-    // uid -> { name, isBarman }
-    const userInfo = new Map();
-    // key = `${uid}_${YYYYMMDD}` -> { upsell, categories, revenue }
-    const dayMap = new Map();
-
-    const getKey = (uid, d) => `${uid}_${d}`;
-    const getEntry = (uid, d) => {
-      const k = getKey(uid, d);
-      if (!dayMap.has(k)) dayMap.set(k, { upsell:0, cats:0, revenue:0 });
-      return dayMap.get(k);
-    };
-
-    // 2. Продукти по чеках (batch)
-    const BATCH = 10;
-    for (let i = 0; i < closedTx.length; i += BATCH) {
-      const batch = closedTx.slice(i, i + BATCH);
-      await Promise.all(batch.map(async (tx) => {
-        const uid  = String(tx.user_id);
-        const name = String(tx.name || "");
-        const txIsBar = isBarman(name);
-        const txId = String(tx.transaction_id);
-        const rawDate = String(tx.date_close || tx.date_close_date || "");
-        const dateStr = rawDate.slice(0,10).replace(/-/g,"");
-        if (!dateStr || dateStr.length < 8) return;
-        if (!userInfo.has(uid)) userInfo.set(uid, { name, isBarman: txIsBar });
-
-        const payed_sum = Number(tx.payed_sum||0)/100;
-        const revPct = txIsBar ? 0.013 : 0.0075;
-        getEntry(uid, dateStr).revenue += payed_sum * revPct;
-
-        try {
-          const prodResp = await poster("dash.getTransactionProducts", { transaction_id: txId });
-          const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
-          const upsellPct = txIsBar ? 0.07 : 0.10;
-          const e = getEntry(uid, dateStr);
-
-          for (const p of products) {
-            const catId = Number(p.category_id);
-            const modId = String(p.modification_id||"0");
-            const num   = Number(p.num||1);
-            const payed = Number(p.payed_sum||0);
-
-            if (catId===17||catId===37||catId===41) {
-              if (payed/100 > 0) e.upsell += (payed/100)*upsellPct;
-              continue;
-            }
-            if (!txIsBar) {
-              if (DESSERT_CATS.has(catId)) { e.cats += (payed/100)*0.05; continue; }
-              if (WINE_CATS.has(catId))    { e.cats += (payed/100)*0.05; continue; }
-              if (COCKTAIL_CAT.has(catId)) { e.cats += (payed/100)*0.05; continue; }
-            }
-            if (modId!=="0") {
-              if (payed===0||payed%100!==0) continue;
-              const rawMod = String(p.modificator_name||"");
-              const { name: rName, qty: rQty } = parseModPart(rawMod);
-              const effQty = rQty>1?rQty:num;
-              const exact = MOD_PRICES.get(normalizeName(rName));
-              if (exact && exact.price>0) {
-                e.upsell += exact.price*effQty*upsellPct;
-              } else {
-                for (const part of rawMod.split(/,\s*\+/).map(s=>s.replace(/^\+/,"").trim()).filter(s=>s.length>3)) {
-                  const { name: pN, qty: pQ } = parseModPart(part);
-                  const mInfo = findModByName(pN, MOD_PRICES);
-                  if (mInfo && mInfo.price>0) e.upsell += mInfo.price*(pQ>1?pQ:num)*upsellPct;
-                }
-              }
-            }
-          }
-        } catch(e) { /* skip */ }
-      }));
-    }
-
-    // 3. Shared barmen bonuses per day
-    const uniqueDates = [...new Set(closedTx.map(tx => String(tx.date_close||tx.date_close_date||"").slice(0,10).replace(/-/g,"")))].filter(d=>d.length>=8).sort();
-    const barmenUids = [...userInfo.entries()].filter(([,v])=>v.isBarman).map(([uid])=>uid);
-    const barmenCountPerDay = new Map(); // dateStr -> count of barmen who worked that day
-
-    for (const uid of barmenUids) {
-      for (const d of uniqueDates) {
-        const worked = closedTx.some(tx => String(tx.user_id)===uid && String(tx.date_close||tx.date_close_date||"").slice(0,10).replace(/-/g,"")=== d);
-        if (worked) barmenCountPerDay.set(d, (barmenCountPerDay.get(d)||0)+1);
-      }
-    }
-
-    for (const d of uniqueDates) {
-      try {
-        const catsResp = await poster("dash.getCategoriesSales", { dateFrom: d, dateTo: d });
-        const catsArr = Array.isArray(catsResp?.response) ? catsResp.response : [];
-        const catRev = new Map();
-        for (const x of catsArr) { catRev.set(Number(x.category_id), Number(x.revenue??x.sales_sum??x.sum??x.payed_sum??0)/100); }
-        const teaCoffee = catRev.get(28)||0;
-        const cocktails = catRev.get(34)||0;
-        const lemonades = [48,49,50].reduce((s,id)=>s+(catRev.get(id)||0),0);
-        const totalShared = teaCoffee*0.07 + cocktails*0.15 + lemonades*0.10;
-        const cnt = Math.max(barmenCountPerDay.get(d)||1, 1);
-        for (const uid of barmenUids) {
-          const worked = closedTx.some(tx => String(tx.user_id)===uid && String(tx.date_close||tx.date_close_date||"").slice(0,10).replace(/-/g,"")=== d);
-          if (worked) getEntry(uid, d).cats += totalShared/cnt;
-        }
-      } catch(e) { /* skip */ }
-    }
-
-    // 4. Будуємо HTML
-    const monthLabel = `${String(m).padStart(2,"0")}.${y}`;
-    // List of available months (current and previous)
+    // Місяці для дропдауну
+    const y0 = +month.slice(0,4), m0 = +month.slice(4,6);
     const months = [];
     for (let i=0; i<4; i++) {
-      const d = new Date(y, m-1-i, 1);
+      const d = new Date(y0, m0-1-i, 1);
       const mm = String(d.getMonth()+1).padStart(2,"0");
       months.push(`${d.getFullYear()}${mm}`);
     }
+    const monthLabel = `${String(m0).padStart(2,"0")}.${y0}`;
+    const monthOptions = months.map(mm => {
+      const ly=mm.slice(0,4), lm=mm.slice(4,6);
+      return `<option value="${mm}" ${mm===month?"selected":""}>${lm}.${ly}</option>`;
+    }).join("");
+    const toolbar = `<div class="toolbar"><label>Місяць:</label><select id="sel">${monthOptions}</select><button onclick="go()">Показати</button></div>`;
 
-    // Group by user
-    const users = [...userInfo.entries()].sort((a,b)=>a[1].name.localeCompare(b[1].name));
-    let bodyHtml = "";
+    // Перевіряємо кеш
+    const now = Date.now();
+    const cached = MONTHLY_CACHE.get(month);
 
-    for (const [uid, info] of users) {
-      const entries = [...dayMap.entries()]
-        .filter(([k])=>k.startsWith(uid+"_"))
-        .map(([k,v])=>({ date: k.slice(uid.length+1), ...v }))
-        .sort((a,b)=>a.date.localeCompare(b.date));
-      if (!entries.length) continue;
-
-      const monthTotal = entries.reduce((s,e)=>s + e.revenue + e.upsell + e.cats, 0);
-      const roleLabel = info.isBarman ? "Бармен" : "Офіціант";
-      const roleColor = info.isBarman ? "#a78bfa" : "#60a5fa";
-
-      bodyHtml += `
-        <div class="person-block">
-          <div class="person-header">
+    if (cached) {
+      if (cached.status === 'error') {
+        MONTHLY_CACHE.delete(month); // retry
+      } else if (cached.status === 'computing') {
+        const elapsed = Math.round((now - cached.startedAt) / 1000);
+        return res.send(`<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
+<meta http-equiv="refresh" content="20">
+<title>Завантаження...</title>
+<style>body{background:#111827;color:#e5e7eb;font-family:-apple-system,sans-serif;padding:20px}
+.card{background:#1f2937;border:1px solid #374151;border-radius:12px;padding:24px;max-width:400px;margin:40px auto;text-align:center}
+h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
+.spinner{width:40px;height:40px;border:3px solid #374151;border-top-color:#3b82f6;border-radius:50%;animation:spin 1s linear infinite;margin:20px auto}
+@keyframes spin{to{transform:rotate(360deg)}}</style></head>
+<body><div class="card">
+<div class="spinner"></div>
+<h2>Обчислення даних...</h2>
+<p>Обробляємо транзакції за місяць ${monthLabel}</p>
+<p>Пройшло: ${elapsed} сек • Сторінка оновиться автоматично</p>
+<p style="color:#6b7280;font-size:12px">Перший запит займає 1–3 хв залежно від кількості чеків</p>
+</div>${toolbar.replace('class="toolbar"','class="toolbar" style="margin-top:20px;justify-content:center"')}
+<script>function go(){window.location.href='/monthly-bonus?month='+document.getElementById('sel').value;}</script>
+</body></html>`);
+      } else if (cached.status === 'done' && now - cached.computedAt < MONTHLY_TTL_MS) {
+        // Рендеримо з кешу
+        const { userInfo, dayMap } = cached.data;
+        let bodyHtml = "";
+        const users = [...userInfo.entries()].sort((a,b)=>a[1].name.localeCompare(b[1].name));
+        for (const [uid, info] of users) {
+          const entries = [...dayMap.entries()].filter(([k])=>k.startsWith(uid+"_")).map(([k,v])=>({ date: k.slice(uid.length+1), ...v })).sort((a,b)=>a.date.localeCompare(b.date));
+          if (!entries.length) continue;
+          const monthTotal = entries.reduce((s,e)=>s+e.revenue+e.upsell+e.cats, 0);
+          const roleColor = info.isBarman ? "#a78bfa" : "#60a5fa";
+          bodyHtml += `<div class="person-block"><div class="person-header">
             <span class="person-name">${info.name}</span>
-            <span class="role-badge" style="background:${roleColor}22;color:${roleColor};border:1px solid ${roleColor}55">${roleLabel}</span>
+            <span class="role-badge" style="background:${roleColor}22;color:${roleColor};border:1px solid ${roleColor}55">${info.isBarman?"Бармен":"Офіціант"}</span>
             <span class="month-total">За місяць: <b>${f2(monthTotal)} ₴</b></span>
-          </div>
-          <table class="day-table">
-            <thead><tr>
-              <th>Дата</th>
-              <th class="tr">Виторг %</th>
-              <th class="tr">Апсейл</th>
-              <th class="tr">Кат. бонус</th>
-              <th class="tr">Разом за день</th>
-            </tr></thead>
-            <tbody>`;
-
-      for (const e of entries) {
-        const dayTotal = e.revenue + e.upsell + e.cats;
-        bodyHtml += `<tr>
-          <td>${fmtDisp(e.date)}</td>
-          <td class="tr">${f2(e.revenue)} ₴</td>
-          <td class="tr">${f2(e.upsell)} ₴</td>
-          <td class="tr">${f2(e.cats)} ₴</td>
-          <td class="tr total-day">${f2(dayTotal)} ₴</td>
-        </tr>`;
+          </div><table class="day-table"><thead><tr>
+            <th>Дата</th><th class="tr">Виторг %</th><th class="tr">Апсейл</th><th class="tr">Кат. бонус</th><th class="tr">Разом</th>
+          </tr></thead><tbody>`;
+          for (const e of entries) {
+            const dayTotal = e.revenue+e.upsell+e.cats;
+            bodyHtml += `<tr><td>${fmtDisp(e.date)}</td><td class="tr">${f2(e.revenue)} ₴</td><td class="tr">${f2(e.upsell)} ₴</td><td class="tr">${f2(e.cats)} ₴</td><td class="tr total-day">${f2(dayTotal)} ₴</td></tr>`;
+          }
+          bodyHtml += `</tbody><tfoot><tr><td colspan="4" class="tr tfoot-label">Разом за ${monthLabel}:</td><td class="tr tfoot-val">${f2(monthTotal)} ₴</td></tr></tfoot></table></div>`;
+        }
+        return res.send(renderMonthlyPage(toolbar, bodyHtml || '<div class="empty">Немає даних</div>', monthLabel));
       }
-
-      bodyHtml += `</tbody>
-            <tfoot><tr>
-              <td colspan="4" class="tr tfoot-label">Разом за ${monthLabel}:</td>
-              <td class="tr tfoot-val">${f2(monthTotal)} ₴</td>
-            </tr></tfoot>
-          </table>
-        </div>`;
     }
 
-    const monthOptions = months.map(mm => {
-      const ly = mm.slice(0,4), lm = mm.slice(4,6);
-      const sel = mm===month ? "selected" : "";
-      return `<option value="${mm}" ${sel}>${lm}.${ly}</option>`;
-    }).join("");
+    // Запускаємо обчислення у фоні
+    MONTHLY_CACHE.set(month, { status: 'computing', startedAt: now });
+    computeMonthlyBonus(month).then(data => {
+      MONTHLY_CACHE.set(month, { status: 'done', data, computedAt: Date.now() });
+    }).catch(e => {
+      console.error("monthly-bonus error:", e);
+      MONTHLY_CACHE.set(month, { status: 'error', error: String(e) });
+    });
 
-    res.send(`<!DOCTYPE html><html lang="uk"><head>
+    return res.send(`<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
+<meta http-equiv="refresh" content="20">
+<title>Завантаження...</title>
+<style>body{background:#111827;color:#e5e7eb;font-family:-apple-system,sans-serif;padding:20px}
+.card{background:#1f2937;border:1px solid #374151;border-radius:12px;padding:24px;max-width:400px;margin:40px auto;text-align:center}
+h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
+.spinner{width:40px;height:40px;border:3px solid #374151;border-top-color:#3b82f6;border-radius:50%;animation:spin 1s linear infinite;margin:20px auto}
+@keyframes spin{to{transform:rotate(360deg)}}</style></head>
+<body><div class="card">
+<div class="spinner"></div>
+<h2>Обчислення даних...</h2>
+<p>Обробляємо транзакції за місяць ${monthLabel}</p>
+<p>Сторінка оновиться автоматично через 20 секунд</p>
+<p style="color:#6b7280;font-size:12px">Перший запит займає 1–3 хв залежно від кількості чеків</p>
+</div>${toolbar.replace('class="toolbar"','class="toolbar" style="margin-top:20px;justify-content:center"')}
+<script>function go(){window.location.href='/monthly-bonus?month='+document.getElementById('sel').value;}</script>
+</body></html>`);
+
+  } catch(e) {
+    res.status(500).send(`<pre>Error: ${e.message}</pre>`);
+  }
+});
+
+function renderMonthlyPage(toolbar, bodyHtml, monthLabel) {
+  return `<!DOCTYPE html><html lang="uk"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Бонуси за місяць</title>
 <style>
@@ -1383,42 +1409,76 @@ h1{font-size:18px;color:#fff;margin-bottom:16px}
 .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap}
 .toolbar label{font-size:13px;color:#9ca3af}
 select,button{background:#1f2937;border:1px solid #374151;color:#e5e7eb;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer}
-button{background:#2563eb;border-color:#2563eb;color:#fff}
-button:hover{background:#1d4ed8}
+button{background:#2563eb;border-color:#2563eb;color:#fff}button:hover{background:#1d4ed8}
 .person-block{background:#1f2937;border:1px solid #374151;border-radius:12px;margin-bottom:16px;overflow:hidden}
 .person-header{padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #374151;background:#111827}
 .person-name{font-size:15px;font-weight:700;color:#fff}
 .role-badge{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600}
-.month-total{margin-left:auto;font-size:13px;color:#9ca3af}
-.month-total b{color:#fcd34d;font-size:15px}
+.month-total{margin-left:auto;font-size:13px;color:#9ca3af}.month-total b{color:#fcd34d;font-size:15px}
 .day-table{width:100%;border-collapse:collapse;font-size:13px}
 .day-table thead tr{background:#111827}
 .day-table th{padding:8px 12px;color:#9ca3af;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
-.day-table td{padding:8px 12px;border-top:1px solid #374151/50}
-.day-table tbody tr:hover{background:#374151/30}
-.day-table tbody tr:nth-child(even){background:#ffffff08}
-.tr{text-align:right}
-.total-day{color:#fcd34d;font-weight:700}
+.day-table td{padding:8px 12px;border-top:1px solid rgba(55,65,81,.5)}
+.day-table tbody tr:nth-child(even){background:rgba(255,255,255,.03)}
+.day-table tbody tr:hover{background:rgba(255,255,255,.06)}
+.tr{text-align:right}.total-day{color:#fcd34d;font-weight:700}
 tfoot tr{background:#111827;border-top:2px solid #374151}
 .tfoot-label{color:#9ca3af;font-size:12px;padding:10px 12px}
 .tfoot-val{color:#34d399;font-weight:700;font-size:14px;padding:10px 12px}
 .empty{text-align:center;color:#6b7280;padding:40px;font-size:14px}
 </style></head><body>
-<h1>📊 Бонуси за місяць</h1>
-<div class="toolbar">
-  <label>Місяць:</label>
-  <select id="sel">${monthOptions}</select>
-  <button onclick="go()">Показати</button>
-</div>
-${bodyHtml || '<div class="empty">Немає даних за цей місяць</div>'}
-<script>
-function go(){const v=document.getElementById('sel').value;window.location.href='/monthly-bonus?month='+v;}
-</script>
-</body></html>`);
+<h1>📊 Бонуси за місяць ${monthLabel}</h1>
+${toolbar}
+${bodyHtml}
+<script>function go(){window.location.href='/monthly-bonus?month='+document.getElementById('sel').value;}</script>
+</body></html>`;
+}
+
+// -------------------- MONTHLY TOTALS (для колонки "За місяць" у дашборді) --------------------
+app.get("/api/monthly-totals", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "No token" });
+    const todayStr = todayYYYYMMDD();
+    const { dateFrom = todayStr } = req.query;
+    const month = dateFrom.slice(0, 6);
+
+    const now = Date.now();
+    const cached = MONTHLY_CACHE.get(month);
+
+    if (cached && cached.status === 'done' && now - cached.computedAt < MONTHLY_TTL_MS) {
+      const result = buildMonthlyTotals(cached.data);
+      return res.json({ status: 'done', month, response: result });
+    }
+
+    if (cached && cached.status === 'computing') {
+      return res.json({ status: 'computing', month, response: [] });
+    }
+
+    // Запускаємо обчислення у фоні
+    MONTHLY_CACHE.set(month, { status: 'computing', startedAt: now });
+    computeMonthlyBonus(month).then(data => {
+      MONTHLY_CACHE.set(month, { status: 'done', data, computedAt: Date.now() });
+    }).catch(e => {
+      console.error("monthly-totals error:", e);
+      MONTHLY_CACHE.set(month, { status: 'error', error: String(e) });
+    });
+
+    res.json({ status: 'computing', month, response: [] });
   } catch(e) {
-    res.status(500).send(`<pre>Error: ${e.message}\n${e.stack}</pre>`);
+    res.status(500).json({ error: String(e) });
   }
 });
+
+function buildMonthlyTotals(data) {
+  const { userInfo, dayMap } = data;
+  const result = [];
+  for (const [uid, info] of userInfo.entries()) {
+    const entries = [...dayMap.entries()].filter(([k]) => k.startsWith(uid + "_")).map(([,v]) => v);
+    const total = entries.reduce((s, e) => s + e.revenue + e.upsell + e.cats, 0);
+    result.push({ user_id: uid, name: info.name, monthly_total: Math.round(total * 100) / 100 });
+  }
+  return result;
+}
 
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`API server listening on ${port}`));
