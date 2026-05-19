@@ -34,9 +34,8 @@ export default function App() {
   const [bonusCategories, setBonusCategories] = useState(null);
   const [barData, setBarData] = useState(null);
   const [monthRevSales, setMonthRevSales] = useState([]);
-  const [monthUpsellData, setMonthUpsellData] = useState([]);
-  const [monthWaitersBonus, setMonthWaitersBonus] = useState([]);
   const [monthTotals, setMonthTotals] = useState([]);
+  const [monthTotalsReady, setMonthTotalsReady] = useState(false);
 
   const fetchJson = useCallback(async (url) => {
     const r = await fetch(url);
@@ -88,25 +87,39 @@ export default function App() {
       setBarData(dBar || null);
     } catch(e) { setBarData(null); }
 
-    // Місячні дані для накопичувального бонусу
+    // Місячні дані: waiters-sales (швидко) + monthly-totals (фонове обчислення)
     try {
       const mFrom = firstDayOfMonthStr(date);
-      const [dMRev, dMUp, dMWB, dMT] = await Promise.all([
+      const [dMRev, dMT] = await Promise.all([
         fetchJson(`${API_BASE}/api/waiters-sales?dateFrom=${mFrom}&dateTo=${date}`),
-        fetchJson(`${API_BASE}/api/upsell-sales?dateFrom=${mFrom}&dateTo=${date}`),
-        fetchJson(`${API_BASE}/api/waiters-bonus?dateFrom=${mFrom}&dateTo=${date}`),
         fetchJson(`${API_BASE}/api/monthly-totals?dateFrom=${date}`),
       ]);
       setMonthRevSales(Array.isArray(dMRev?.response) ? dMRev.response : []);
-      setMonthUpsellData(Array.isArray(dMUp?.response) ? dMUp.response : []);
-      setMonthWaitersBonus(Array.isArray(dMWB?.response) ? dMWB.response : []);
-      setMonthTotals(Array.isArray(dMT?.response) ? dMT.response : []);
-    } catch(e) { setMonthRevSales([]); setMonthUpsellData([]); setMonthWaitersBonus([]); setMonthTotals([]); }
+      const totalsArr = Array.isArray(dMT?.response) ? dMT.response : [];
+      setMonthTotals(totalsArr);
+      setMonthTotalsReady(dMT?.status === 'done' && totalsArr.length > 0);
+    } catch(e) { setMonthRevSales([]); setMonthTotals([]); setMonthTotalsReady(false); }
 
   }, [date, fetchJson]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
   useEffect(() => { const id = setInterval(loadAll, 5*60*1000); return () => clearInterval(id); }, [loadAll]);
+
+  // Якщо monthly-totals іще рахується — перезапитуємо кожні 30 сек
+  useEffect(() => {
+    if (monthTotalsReady) return; // вже готово
+    const id = setInterval(async () => {
+      try {
+        const dMT = await fetchJson(`${API_BASE}/api/monthly-totals?dateFrom=${date}`);
+        const arr = Array.isArray(dMT?.response) ? dMT.response : [];
+        if (dMT?.status === 'done' && arr.length > 0) {
+          setMonthTotals(arr);
+          setMonthTotalsReady(true);
+        }
+      } catch { /* ignore */ }
+    }, 30000);
+    return () => clearInterval(id);
+  }, [monthTotalsReady, date, fetchJson]);
 
   const totals = useMemo(() => {
     const rev = daySales.reduce((s,w) => s+Number(w.revenue||0)/100, 0);
@@ -116,21 +129,38 @@ export default function App() {
 
   const isBarName = (name) => { const n = (name || "").toLowerCase(); return n.includes("бар") || n.includes("bar"); };
 
+  // Офіціанти: швидкий підрахунок з revenue (відразу) + точний з monthTotals коли готово
   const waitersMonthMap = useMemo(() => {
     const map = {};
-    for (const b of monthTotals) {
-      map[String(b.user_id)] = b.monthly_total || 0;
+    if (monthTotalsReady) {
+      // Точні дані з фонового обчислення
+      for (const b of monthTotals) map[String(b.user_id)] = b.monthly_total || 0;
+    } else {
+      // Приблизно: тільки виторг (швидко, без апсейлу і категорій)
+      for (const w of monthRevSales) {
+        if (isBarName(w.name)) continue;
+        const rev = Number(w.revenue||0)/100;
+        map[String(w.user_id)] = Math.round(rev * 0.0075 * 100) / 100;
+      }
     }
     return map;
-  }, [monthTotals]);
+  }, [monthRevSales, monthTotals, monthTotalsReady]);
 
+  // Бармени: з monthTotals (включає поденний розподіл категорій + спільні зміни)
   const barmenMonthMap = useMemo(() => {
     const map = {};
-    for (const b of monthTotals) {
-      map[String(b.user_id)] = b.monthly_total || 0;
+    if (monthTotalsReady) {
+      for (const b of monthTotals) map[String(b.user_id)] = b.monthly_total || 0;
+    } else {
+      // Приблизно: тільки виторг
+      for (const w of monthRevSales) {
+        if (!isBarName(w.name)) continue;
+        const rev = Number(w.revenue||0)/100;
+        map[String(w.user_id)] = Math.round(rev * 0.013 * 100) / 100;
+      }
     }
     return map;
-  }, [monthTotals]);
+  }, [monthRevSales, monthTotals, monthTotalsReady]);
 
   const waitersTable = useMemo(() => {
     return daySales
@@ -271,12 +301,15 @@ export default function App() {
                       <th className="text-right py-2 text-xs font-medium w-1/6">Вино</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Алк. коктейлі</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6 text-yellow-400">Разом</th>
-                      <th className="text-right py-2 text-xs font-medium w-1/6 text-emerald-400">За місяць</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6 text-emerald-400">
+                        За місяць{!monthTotalsReady && <span className="ml-1 animate-pulse text-gray-500">●</span>}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/40">
                     {waitersTable.map((row, i) => {
                       const total = (row.revenue_bonus||0)+(row.upsell_bonus||0)+(row.desserts_bonus||0)+(row.wines_bonus||0)+(row.cocktails_bonus||0);
+                      const monthVal = waitersMonthMap[row.user_id];
                       return (
                       <tr key={row.user_id} className={`transition-colors hover:bg-blue-900/10 ${i%2===0?"":"bg-gray-700/10"}`}>
                         <td className="py-2.5 text-sm font-semibold text-white">{row.name||"—"}</td>
@@ -286,7 +319,9 @@ export default function App() {
                         <td className="py-2.5 text-right text-sm text-purple-300">{money(row.wines_bonus)} ₴</td>
                         <td className="py-2.5 text-right text-sm text-orange-300">{money(row.cocktails_bonus)} ₴</td>
                         <td className="py-2.5 text-right text-sm font-bold text-yellow-300">{money(total)} ₴</td>
-                        <td className="py-2.5 text-right text-sm font-bold text-emerald-400">{money(waitersMonthMap[row.user_id]||0)} ₴</td>
+                        <td className="py-2.5 text-right text-sm font-bold text-emerald-400">
+                          {monthVal != null ? `${money(monthVal)} ₴` : <span className="text-gray-500 animate-pulse">…</span>}
+                        </td>
                       </tr>
                       );
                     })}
@@ -319,12 +354,15 @@ export default function App() {
                       <th className="text-right py-2 text-xs font-medium w-1/6">Алк. коктейлі</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6">Лимонади + Мохіто</th>
                       <th className="text-right py-2 text-xs font-medium w-1/6 text-yellow-400">Разом</th>
-                      <th className="text-right py-2 text-xs font-medium w-1/6 text-emerald-400">За місяць</th>
+                      <th className="text-right py-2 text-xs font-medium w-1/6 text-emerald-400">
+                        За місяць{!monthTotalsReady && <span className="ml-1 animate-pulse text-gray-500">●</span>}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700/40">
                     {barmenBonus.map((row, i) => {
                       const total = (row.revenue_bonus||0)+(row.upsell_bonus||0)+(row.tea_coffee_share||0)+(row.cocktails_share||0)+(row.lemonades_share||0);
+                      const monthVal = barmenMonthMap[row.user_id];
                       return (
                       <tr key={row.user_id} className={`transition-colors hover:bg-purple-900/10 ${i%2===0?"":"bg-gray-700/10"}`}>
                         <td className="py-2.5 text-sm font-semibold text-white">{row.name||"—"}</td>
@@ -334,7 +372,9 @@ export default function App() {
                         <td className="py-2.5 text-right text-sm text-purple-300">{money(row.cocktails_share)} ₴</td>
                         <td className="py-2.5 text-right text-sm text-green-300">{money(row.lemonades_share)} ₴</td>
                         <td className="py-2.5 text-right text-sm font-bold text-yellow-300">{money(total)} ₴</td>
-                        <td className="py-2.5 text-right text-sm font-bold text-emerald-400">{money(barmenMonthMap[row.user_id]||0)} ₴</td>
+                        <td className="py-2.5 text-right text-sm font-bold text-emerald-400">
+                          {monthVal != null ? `${money(monthVal)} ₴` : <span className="text-gray-500 animate-pulse">…</span>}
+                        </td>
                       </tr>
                       );
                     })}
