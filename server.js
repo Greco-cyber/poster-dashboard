@@ -1342,12 +1342,32 @@ h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
       } else if (cached.status === 'done' && now - cached.computedAt < MONTHLY_TTL_MS) {
         // Рендеримо з кешу
         const { userInfo, dayMap } = cached.data;
+
+        // Збираємо спільні зміни (з "/") щоб додати їх частку до індивідуальних
+        const sharedEntries = new Map(); // uid -> [{date, revenue, upsell, cats, share}]
+        for (const [uid, info] of userInfo.entries()) {
+          if (!info.name.includes("/")) continue;
+          const parts = info.name.split("/").map(s => s.trim()).filter(Boolean);
+          const share = 1 / parts.length;
+          const entries = [...dayMap.entries()].filter(([k])=>k.startsWith(uid+"_")).map(([k,v])=>({ date: k.slice(uid.length+1), ...v, share }));
+          for (const part of parts) {
+            // Беремо останнє слово — особисте ім'я (напр. "BAR СЕРГІЙ" → "СЕРГІЙ")
+            const personalName = part.split(/\s+/).pop().toUpperCase();
+            const matchUid = [...userInfo.entries()].find(([,v])=>!v.name.includes("/")&&v.isBarman&&v.name.toUpperCase().includes(personalName))?.[0];
+            const key = matchUid || `split_${part}`;
+            if (!sharedEntries.has(key)) sharedEntries.set(key, []);
+            sharedEntries.get(key).push(...entries);
+          }
+        }
+
         let bodyHtml = "";
-        const users = [...userInfo.entries()].sort((a,b)=>a[1].name.localeCompare(b[1].name));
+        const users = [...userInfo.entries()].filter(([,v])=>!v.name.includes("/")).sort((a,b)=>a[1].name.localeCompare(b[1].name));
         for (const [uid, info] of users) {
-          const entries = [...dayMap.entries()].filter(([k])=>k.startsWith(uid+"_")).map(([k,v])=>({ date: k.slice(uid.length+1), ...v })).sort((a,b)=>a.date.localeCompare(b.date));
-          if (!entries.length) continue;
-          const monthTotal = entries.reduce((s,e)=>s+e.revenue+e.upsell+e.cats, 0);
+          const ownEntries = [...dayMap.entries()].filter(([k])=>k.startsWith(uid+"_")).map(([k,v])=>({ date: k.slice(uid.length+1), label: k.slice(uid.length+1), own: true, ...v })).sort((a,b)=>a.date.localeCompare(b.date));
+          const splitEntries = (sharedEntries.get(uid)||[]).map(e=>({ ...e, label: e.date, own: false })).sort((a,b)=>a.date.localeCompare(b.date));
+          const allEntries = [...ownEntries, ...splitEntries].sort((a,b)=>a.date.localeCompare(b.date));
+          if (!allEntries.length) continue;
+          const monthTotal = allEntries.reduce((s,e)=>s+(e.own?(e.revenue+e.upsell+e.cats):(e.revenue+e.upsell+e.cats)*e.share), 0);
           const roleColor = info.isBarman ? "#a78bfa" : "#60a5fa";
           bodyHtml += `<div class="person-block"><div class="person-header">
             <span class="person-name">${info.name}</span>
@@ -1356,9 +1376,11 @@ h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
           </div><table class="day-table"><thead><tr>
             <th>Дата</th><th class="tr">Виторг %</th><th class="tr">Апсейл</th><th class="tr">Кат. бонус</th><th class="tr">Разом</th>
           </tr></thead><tbody>`;
-          for (const e of entries) {
-            const dayTotal = e.revenue+e.upsell+e.cats;
-            bodyHtml += `<tr><td>${fmtDisp(e.date)}</td><td class="tr">${f2(e.revenue)} ₴</td><td class="tr">${f2(e.upsell)} ₴</td><td class="tr">${f2(e.cats)} ₴</td><td class="tr total-day">${f2(dayTotal)} ₴</td></tr>`;
+          for (const e of allEntries) {
+            const mul = e.own ? 1 : (e.share||0.5);
+            const dayTotal = (e.revenue+e.upsell+e.cats)*mul;
+            const mark = e.own ? "" : ' <span style="color:#f59e0b;font-size:10px">½ спільна</span>';
+            bodyHtml += `<tr${e.own?"":" style=\"opacity:0.8\""}><td>${fmtDisp(e.date)}${mark}</td><td class="tr">${f2(e.revenue*mul)} ₴</td><td class="tr">${f2(e.upsell*mul)} ₴</td><td class="tr">${f2(e.cats*mul)} ₴</td><td class="tr total-day">${f2(dayTotal)} ₴</td></tr>`;
           }
           bodyHtml += `</tbody><tfoot><tr><td colspan="4" class="tr tfoot-label">Разом за ${monthLabel}:</td><td class="tr tfoot-val">${f2(monthTotal)} ₴</td></tr></tfoot></table></div>`;
         }
@@ -1471,14 +1493,64 @@ app.get("/api/monthly-totals", async (req, res) => {
 
 function buildMonthlyTotals(data) {
   const { userInfo, dayMap } = data;
-  const result = [];
+
+  // 1. Рахуємо сирий підсумок по кожному uid
+  const rawTotals = new Map();
   for (const [uid, info] of userInfo.entries()) {
     const entries = [...dayMap.entries()].filter(([k]) => k.startsWith(uid + "_")).map(([,v]) => v);
     const total = entries.reduce((s, e) => s + e.revenue + e.upsell + e.cats, 0);
-    result.push({ user_id: uid, name: info.name, monthly_total: Math.round(total * 100) / 100 });
+    rawTotals.set(uid, { name: info.name, isBarman: info.isBarman, total });
+  }
+
+  // 2. Знаходимо спільні профілі (ім'я містить "/"), напр. "BAR СЕРГІЙ/МАРК"
+  for (const [sharedUid, sharedData] of rawTotals.entries()) {
+    if (!sharedData.name.includes("/")) continue;
+    const parts = sharedData.name.split("/").map(s => s.trim()).filter(Boolean);
+    const perShare = sharedData.total / parts.length;
+
+    for (const part of parts) {
+      // Беремо останнє слово — особисте ім'я (напр. "BAR СЕРГІЙ" → "СЕРГІЙ", "МАРК" → "МАРК")
+      const personalName = part.split(/\s+/).pop().toUpperCase();
+      let matched = null;
+      for (const [uid, d] of rawTotals.entries()) {
+        if (d.name.includes("/")) continue;
+        if (!d.isBarman) continue; // тільки бармени, офіціантів не чіпаємо
+        if (d.name.toUpperCase().includes(personalName)) { matched = uid; break; }
+      }
+      if (matched) {
+        rawTotals.get(matched).total += perShare;
+      } else {
+        // Бармен цього місяця працював тільки у спільних змінах
+        rawTotals.set(`split_${personalName}`, { name: personalName, isBarman: true, total: perShare });
+      }
+    }
+  }
+
+  // 3. Повертаємо тільки індивідуальні профілі (без "/"")
+  const result = [];
+  for (const [uid, data] of rawTotals.entries()) {
+    if (data.name.includes("/")) continue;
+    result.push({ user_id: uid, name: data.name, monthly_total: Math.round(data.total * 100) / 100 });
   }
   return result;
 }
 
 const port = process.env.PORT || 3001;
-app.listen(port, () => console.log(`API server listening on ${port}`));
+app.listen(port, () => {
+  console.log(`API server listening on ${port}`);
+  // Pre-warm: відразу рахуємо місячний бонус у фоні при старті сервера
+  // Щоб до першого відкриття дашборду дані вже були в кеші
+  const _month = todayYYYYMMDD().slice(0, 6);
+  if (!MONTHLY_CACHE.has(_month)) {
+    MONTHLY_CACHE.set(_month, { status: 'computing', startedAt: Date.now() });
+    computeMonthlyBonus(_month)
+      .then(data => {
+        MONTHLY_CACHE.set(_month, { status: 'done', data, computedAt: Date.now() });
+        console.log(`Monthly bonus pre-warm done for ${_month}`);
+      })
+      .catch(e => {
+        MONTHLY_CACHE.delete(_month);
+        console.error(`Monthly bonus pre-warm error:`, e);
+      });
+  }
+});
