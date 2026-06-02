@@ -622,6 +622,9 @@ function go(f){
     // uid -> { name, isBarman, revenue, checks: [{ tx_id, time, lines:[{product,qty,amount,pct,type}] }] }
     const userDetails = new Map();
 
+    // Відстежуємо які бармен-профілі вийшли в кожен день
+    const dayBarmenProfiles = new Map(); // dateStr -> Set of barman profile uids
+
     const BATCH = 10;
     for (let i = 0; i < closedTx.length; i += BATCH) {
       const batch = closedTx.slice(i, i + BATCH);
@@ -631,6 +634,14 @@ function go(f){
         const txIsBar = isBarman(txName);
         const txId = String(tx.transaction_id);
         const time = String(tx.date_close_date || "");
+        // Записуємо що цей бармен-профіль виходив у цей день
+        if (txIsBar) {
+          const txDate = time.slice(0,10).replace(/-/g,"");
+          if (txDate.length >= 8) {
+            if (!dayBarmenProfiles.has(txDate)) dayBarmenProfiles.set(txDate, new Set());
+            dayBarmenProfiles.get(txDate).add(uid);
+          }
+        }
         try {
           const prodResp = await poster("dash.getTransactionProducts", { transaction_id: txId });
           const products = Array.isArray(prodResp?.response) ? prodResp.response : [];
@@ -702,9 +713,69 @@ function go(f){
           if (lines.length > 0) {
             if (!userDetails.has(uid)) {
               const rv = revenueMap.get(uid) || {};
-              userDetails.set(uid, { name: rv.name||txName, isBarman: txIsBar, revenue: rv.revenue||0, checks:[] });
+              userDetails.set(uid, { user_id: uid, name: rv.name||txName, isBarman: txIsBar, revenue: rv.revenue||0, checks:[] });
             }
             userDetails.get(uid).checks.push({ tx_id: txId, time, lines });
+          }
+        } catch { /* skip */ }
+      }));
+    }
+
+    // 3b. Категорійні бонуси барменів — рахуємо по кожному дню окремо (як computeMonthlyBonus)
+    // Для кожного дня: getCategoriesSales → ділимо між реальними барменами що вийшли
+    const barmanCatTotals = new Map(); // uid -> { tea, cocktails, lemonades }
+    const uniqueBarDates = [...dayBarmenProfiles.keys()].sort();
+    const BATCH_C = 5;
+    for (let i = 0; i < uniqueBarDates.length; i += BATCH_C) {
+      const batch = uniqueBarDates.slice(i, i + BATCH_C);
+      await Promise.all(batch.map(async (d) => {
+        try {
+          const cR = await poster("dash.getCategoriesSales", { dateFrom: d, dateTo: d });
+          const cArr = Array.isArray(cR?.response) ? cR.response : [];
+          const cMap = new Map();
+          for (const x of cArr) cMap.set(Number(x.category_id), Number(x.revenue??x.sales_sum??x.sum??x.payed_sum??0)/100);
+          const tea      = (cMap.get(28)||0) * 0.07;
+          const cocktails= (cMap.get(34)||0) * 0.15;
+          const lemonades= [48,49,50].reduce((s,id)=>s+(cMap.get(id)||0),0) * 0.10;
+          const dayTotal = tea + cocktails + lemonades;
+          if (dayTotal === 0) return;
+
+          // Визначаємо реальних барменів цього дня (розкриваємо "/" профілі)
+          const profiles = dayBarmenProfiles.get(d) || new Set();
+          const realBarmen = []; // [{uid, weight}] — weight=0.5 для "/" профілів
+          for (const pUid of profiles) {
+            const pName = userDetails.get(pUid)?.name || revenueMap.get(pUid)?.name || "";
+            if (pName.includes("/")) {
+              const parts = pName.split("/").map(s=>s.trim()).filter(Boolean);
+              const share = 1 / parts.length;
+              for (const part of parts) {
+                const pn = part.split(/\s+/).pop().toUpperCase();
+                // Знаходимо uid індивідуального бармена
+                let matchUid = null;
+                for (const [mUid, mData] of userDetails.entries()) {
+                  if (!mData.isBarman || mData.name.includes("/")) continue;
+                  if (mData.name.toUpperCase().includes(pn)) { matchUid = mUid; break; }
+                }
+                if (!matchUid) {
+                  for (const [mUid, mData] of revenueMap.entries()) {
+                    if (!mData.isBarman || mData.name.includes("/")) continue;
+                    if (mData.name.toUpperCase().includes(pn)) { matchUid = mUid; break; }
+                  }
+                }
+                if (matchUid) realBarmen.push({ uid: matchUid, weight: share });
+              }
+            } else {
+              realBarmen.push({ uid: pUid, weight: 1 });
+            }
+          }
+          const totalWeight = realBarmen.reduce((s,b)=>s+b.weight,0) || 1;
+          for (const { uid: bUid, weight } of realBarmen) {
+            const portion = weight / totalWeight;
+            if (!barmanCatTotals.has(bUid)) barmanCatTotals.set(bUid, {tea:0,cocktails:0,lemonades:0});
+            const t = barmanCatTotals.get(bUid);
+            t.tea       = r2(t.tea       + tea       * portion);
+            t.cocktails = r2(t.cocktails + cocktails * portion);
+            t.lemonades = r2(t.lemonades + lemonades * portion);
           }
         } catch { /* skip */ }
       }));
@@ -713,10 +784,10 @@ function go(f){
     // Додаємо тих у кого є виторг але немає допів
     for (const [uid, info] of revenueMap) {
       if (!userDetails.has(uid)) {
-        userDetails.set(uid, { name: info.name, isBarman: info.isBarman, revenue: info.revenue, checks:[] });
+        userDetails.set(uid, { user_id: uid, name: info.name, isBarman: info.isBarman, revenue: info.revenue, checks:[] });
       } else {
         const u = userDetails.get(uid);
-        u.revenue = info.revenue; u.name = info.name; u.isBarman = info.isBarman;
+        u.user_id = uid; u.revenue = info.revenue; u.name = info.name; u.isBarman = info.isBarman;
       }
     }
 
@@ -726,7 +797,23 @@ function go(f){
     const pStr = v => `${+(v*100).toFixed(2)}%`;
 
     const waiters = [...userDetails.values()].filter(u=>!u.isBarman).sort((a,b)=>b.revenue-a.revenue);
-    const barmen  = [...userDetails.values()].filter(u=>u.isBarman).sort((a,b)=>b.revenue-a.revenue);
+    const barmenAll = [...userDetails.values()].filter(u=>u.isBarman);
+
+    // Будуємо map: особисте ім'я → внесок зі спільних змін (чеки × 50%)
+    // напр. "СЕРГІЙ" → [{checks, share:0.5}] зі зміни "BAR СЕРГІЙ/МАРК"
+    const sharedContrib = new Map(); // personalNameUpper → [{checks, share}]
+    for (const u of barmenAll.filter(u => u.name.includes("/"))) {
+      const parts = u.name.split("/").map(s => s.trim()).filter(Boolean);
+      const share = 1 / parts.length;
+      for (const part of parts) {
+        const pName = part.split(/\s+/).pop().toUpperCase();
+        if (!sharedContrib.has(pName)) sharedContrib.set(pName, []);
+        sharedContrib.get(pName).push({ checks: u.checks, share });
+      }
+    }
+
+    // Лише індивідуальні бармени (без "/")
+    const barmen = barmenAll.filter(u => !u.name.includes("/")).sort((a,b)=>b.revenue-a.revenue);
 
     // ---- CSV ----
     if (format === "csv") {
@@ -743,11 +830,22 @@ function go(f){
           }
         }
         if (u.isBarman) {
-          const tc=r2(teaCoffeeRev*0.07), co=r2(cocktailsRev*0.15), le=r2(lemonadesRev*0.10);
-          rows.push([role,u.name,"—","","☕ Чай/Кава (зміна)","Спільне",f2(teaCoffeeRev),"7%",f2(tc)]);
-          rows.push([role,u.name,"—","","🍸 Алк. коктейлі (зміна)","Спільне",f2(cocktailsRev),"15%",f2(co)]);
-          rows.push([role,u.name,"—","","🍋 Лимонади + Мохіто (зміна)","Спільне",f2(lemonadesRev),"10%",f2(le)]);
-          total=r2(total+tc+co+le);
+          // Спільні зміни (50%)
+          const personalName = u.name.split(/\s+/).pop().toUpperCase();
+          for (const sc of (sharedContrib.get(personalName)||[])) {
+            for (const ch of sc.checks) {
+              for (const l of ch.lines) {
+                const b = r2(l.amount*l.pct*sc.share); total=r2(total+b);
+                rows.push([role,u.name,"#"+ch.tx_id,ch.time,l.product+"(½ спільна)",l.type,f2(l.amount*sc.share),pStr(l.pct),f2(b)]);
+              }
+            }
+          }
+          // Категорії — per-day розрахунок
+          const cats_c = barmanCatTotals.get(u.user_id) || {tea:0,cocktails:0,lemonades:0};
+          rows.push([role,u.name,"—","","☕ Чай/Кава","Спільне","","7%",f2(cats_c.tea)]);
+          rows.push([role,u.name,"—","","🍸 Алк. коктейлі","Спільне","","15%",f2(cats_c.cocktails)]);
+          rows.push([role,u.name,"—","","🍋 Лимонади + Мохіто","Спільне","","10%",f2(cats_c.lemonades)]);
+          total=r2(total+cats_c.tea+cats_c.cocktails+cats_c.lemonades);
         }
         rows.push(["","ПІДСУМОК: "+u.name,"","","","","","",f2(r2(total))]);
         rows.push([]);
@@ -781,22 +879,18 @@ function go(f){
       "Лимонади + Мохіто":{ label:"Лимонади + Мохіто", color:"#34d399" },
     };
 
-    const buildRows = (u) => {
-      let total = 0, rows = "";
-
-      // Групуємо по чеку
-      for (const ch of (u.checks||[]).sort((a,b)=>a.time.localeCompare(b.time))) {
+    const renderChecks = (checks, mul, label) => {
+      let rows = "", subtotal = 0;
+      for (const ch of (checks||[]).sort((a,b)=>a.time.localeCompare(b.time))) {
         if (!ch.lines.length) continue;
         const timeStr = (ch.time||"").slice(11,16);
-        // Заголовок чека
         rows += `<tr class="row-check-header">
           <td colspan="4" class="td-check-header">
-            Чек #${ch.tx_id}${timeStr ? ` · ${timeStr}` : ""}
-          </td>
-        </tr>`;
-        // Позиції чека
+            ${label||""}Чек #${ch.tx_id}${timeStr ? ` · ${timeStr}` : ""}
+          </td></tr>`;
         for (const l of ch.lines) {
-          const b = r2(l.amount*l.pct); total=r2(total+b);
+          const b = r2(l.amount * l.pct * mul);
+          subtotal = r2(subtotal + b);
           const dc = DASH_COL[l.type] || { label: l.type, color:"#9ca3af" };
           rows += `<tr class="row-item">
             <td class="td-indent">↳</td>
@@ -804,20 +898,39 @@ function go(f){
               <span class="dash-col-badge" style="background:${dc.color}22;color:${dc.color};border-color:${dc.color}55">${dc.label}</span>
               <span class="item-name">${l.product}</span>
             </td>
-            <td class="td-r">${f0(l.amount)} ₴ <span class="td-pct-inline">${pStr(l.pct)}</span></td>
+            <td class="td-r">${f0(l.amount*mul)} ₴ <span class="td-pct-inline">${pStr(l.pct)}</span></td>
             <td class="td-bonus">${f2(b)} ₴</td></tr>`;
         }
       }
+      return { rows, subtotal };
+    };
 
+    const buildRows = (u) => {
+      let total = 0, rows = "";
+
+      // Власні чеки
+      const own = renderChecks(u.checks, 1, "");
+      rows += own.rows; total = r2(total + own.subtotal);
+
+      // Чеки зі спільних змін (BAR СЕРГІЙ/МАРК → 50% до Сергія і Марка)
       if (u.isBarman) {
-        const shared = [
-          { label:"☕ Чай / Кава",        amt: teaCoffeeRev, pct: 0.07, dashCol:"Чай / Кава" },
-          { label:"🍸 Алк. коктейлі",     amt: cocktailsRev, pct: 0.15, dashCol:"Алк. коктейлі" },
-          { label:"🍋 Лимонади + Мохіто", amt: lemonadesRev, pct: 0.10, dashCol:"Лимонади + Мохіто" },
+        const personalName = u.name.split(/\s+/).pop().toUpperCase();
+        const contrib = sharedContrib.get(personalName) || [];
+        for (const sc of contrib) {
+          const shared = renderChecks(sc.checks, sc.share, `½ спільна зміна · `);
+          rows += shared.rows; total = r2(total + shared.subtotal);
+        }
+
+        // Спільні категорійні бонуси — per-day розрахунок
+        const cats_u = barmanCatTotals.get(u.user_id) || {tea:0,cocktails:0,lemonades:0};
+        const catsArr2 = [
+          { label:"☕ Чай / Кава",        val: cats_u.tea,       dashCol:"Чай / Кава",          pct:0.07 },
+          { label:"🍸 Алк. коктейлі",     val: cats_u.cocktails,  dashCol:"Алк. коктейлі",       pct:0.15 },
+          { label:"🍋 Лимонади + Мохіто", val: cats_u.lemonades,  dashCol:"Лимонади + Мохіто",   pct:0.10 },
         ];
         rows += `<tr class="row-check-header"><td colspan="4" class="td-check-header">Загальне по зміні</td></tr>`;
-        for (const s of shared) {
-          const b = r2(s.amt*s.pct); total=r2(total+b);
+        for (const s of catsArr2) {
+          total = r2(total + s.val);
           const dc = DASH_COL[s.dashCol] || { label: s.dashCol, color:"#60a5fa" };
           rows += `<tr class="row-shared">
             <td class="td-indent">↳</td>
@@ -825,8 +938,8 @@ function go(f){
               <span class="dash-col-badge" style="background:${dc.color}22;color:${dc.color};border-color:${dc.color}55">${dc.label}</span>
               <span class="item-name">${s.label}</span>
             </td>
-            <td class="td-r">${f0(s.amt)} ₴ <span class="td-pct-inline">${pStr(s.pct)}</span></td>
-            <td class="td-bonus">${f2(b)} ₴</td></tr>`;
+            <td class="td-r"><span class="td-pct-inline">${pStr(s.pct)}</span></td>
+            <td class="td-bonus">${f2(s.val)} ₴</td></tr>`;
         }
       }
 
@@ -840,9 +953,18 @@ function go(f){
       if (!users.length) return "";
       let s = `<h2 class="sec-title">${title}</h2>`;
       for (const u of users) {
-          let total = 0;
+        let total = 0;
         for (const ch of u.checks) for (const l of ch.lines) total=r2(total+l.amount*l.pct);
-        if (u.isBarman) total=r2(total+teaCoffeeRev*0.07+cocktailsRev*0.15+lemonadesRev*0.10);
+        if (u.isBarman) {
+          // Чеки зі спільних змін (50%)
+          const personalName = u.name.split(/\s+/).pop().toUpperCase();
+          for (const sc of (sharedContrib.get(personalName)||[])) {
+            for (const ch of sc.checks) for (const l of ch.lines) total=r2(total+l.amount*l.pct*sc.share);
+          }
+          // Категорійні бонуси — per-day розрахунок
+          const cats_h = barmanCatTotals.get(u.user_id) || {tea:0,cocktails:0,lemonades:0};
+          total=r2(total+cats_h.tea+cats_h.cocktails+cats_h.lemonades);
+        }
         s += `<div class="ublock">
           <div class="uhead">
             <span class="uname">${u.name}</span>
