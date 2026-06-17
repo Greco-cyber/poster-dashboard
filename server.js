@@ -1,6 +1,7 @@
 // server.js
 const express = require("express");
 const cors = require("cors");
+const ExcelJS = require("exceljs");
 
 const app = express();
 app.use(cors());
@@ -1442,7 +1443,7 @@ app.get("/monthly-bonus", async (req, res) => {
       const ly=mm.slice(0,4), lm=mm.slice(4,6);
       return `<option value="${mm}" ${mm===month?"selected":""}>${lm}.${ly}</option>`;
     }).join("");
-    const toolbar = `<div class="toolbar"><label>Місяць:</label><select id="sel">${monthOptions}</select><button onclick="go()">Показати</button></div>`;
+    const toolbar = `<div class="toolbar"><label>Місяць:</label><select id="sel">${monthOptions}</select><button onclick="go()">Показати</button><button class="btn-xl" onclick="dl()">⬇ Завантажити Excel</button></div>`;
 
     // Перевіряємо кеш
     const now = Date.now();
@@ -1599,6 +1600,7 @@ h1{font-size:18px;color:#fff;margin-bottom:16px}
 .toolbar label{font-size:13px;color:#9ca3af}
 select,button{background:#1f2937;border:1px solid #374151;color:#e5e7eb;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer}
 button{background:#2563eb;border-color:#2563eb;color:#fff}button:hover{background:#1d4ed8}
+.btn-xl{background:#059669;border-color:#059669;color:#fff;font-weight:600}.btn-xl:hover{background:#047857}
 .person-block{background:#1f2937;border:1px solid #374151;border-radius:12px;margin-bottom:16px;overflow:hidden}
 .person-header{padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #374151;background:#111827}
 .person-name{font-size:15px;font-weight:700;color:#fff}
@@ -1630,7 +1632,10 @@ tfoot tr{background:#111827;border-top:2px solid #374151}
 <h1>📊 Бонуси за місяць ${monthLabel}</h1>
 ${toolbar}
 ${bodyHtml}
-<script>function go(){window.location.href='/monthly-bonus?month='+document.getElementById('sel').value;}</script>
+<script>
+function go(){window.location.href='/monthly-bonus?month='+document.getElementById('sel').value;}
+function dl(){window.location.href='/monthly-bonus/export?month='+document.getElementById('sel').value;}
+</script>
 </body></html>`;
 }
 
@@ -1743,6 +1748,144 @@ function buildMonthlyTotals(data) {
   }
   return result;
 }
+
+// -------------------- EXCEL EXPORT --------------------
+app.get("/monthly-bonus/export", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).send("No token");
+    const todayStr = todayYYYYMMDD();
+    let { month } = req.query;
+    if (!month) month = todayStr.slice(0,6);
+
+    const cached = MONTHLY_CACHE.get(month);
+    if (!cached || cached.status !== 'done') {
+      return res.status(202).send("Дані ще обчислюються. Зачекайте та спробуйте знову.");
+    }
+
+    const totals = buildMonthlyTotals(cached.data);
+    const barmenT  = totals.filter(t=> t.isBarman).sort((a,b)=>b.monthly_total-a.monthly_total);
+    const waitersT = totals.filter(t=>!t.isBarman).sort((a,b)=>b.monthly_total-a.monthly_total);
+    const { userInfo, dayMap } = cached.data;
+    const periodLabel = `${cached.data.dateFrom.slice(6,8)}.${cached.data.dateFrom.slice(4,6)} – ${cached.data.dateTo.slice(6,8)}.${cached.data.dateTo.slice(4,6)}`;
+    const y = month.slice(0,4), m = month.slice(4,6);
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "GRECO Dashboard";
+    wb.created = new Date();
+
+    const money2 = v => Math.round((v||0)*100)/100;
+
+    // Стилі
+    const HDR_FILL  = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF1F2937' } };
+    const BAR_FILL  = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF2D1B69' } };
+    const WAIT_FILL = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF1B3A69' } };
+    const SHAR_FILL = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF3D2A10' } };
+    const TOT_FILL  = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF064E3B' } };
+    const WHITE     = { argb:'FFFFFFFF' };
+    const YELLOW    = { argb:'FFFCD34D' };
+    const GREEN     = { argb:'FF34D399' };
+    const GRAY      = { argb:'FF9CA3AF' };
+    const ORANGE    = { argb:'FFFBBF24' };
+    const thin = { style:'thin', color:{ argb:'FF374151' } };
+    const border = { top:thin, left:thin, bottom:thin, right:thin };
+
+    const makeSheet = (name, isBarman) => {
+      const ws = wb.addWorksheet(name);
+      const cols = isBarman
+        ? ['Ім\'я','Виторг (1.3%)','Соуси + допи (7%)','Чай / Кава (7%)','Алк. коктейлі (15%)','Лимонади + Мохіто (10%)','Загальна']
+        : ['Ім\'я','Виторг (0.75%)','Соуси + доп (10%)','Десерти (5%)','Вино (5%)','Алк. коктейлі (5%)','Загальна'];
+
+      // Рядок 1: заголовок
+      const titleRow = ws.addRow([`${isBarman?'🍸 Бармени':'🧾 Офіціанти'} — Бонуси за ${periodLabel}`]);
+      ws.mergeCells(`A1:G1`);
+      titleRow.getCell(1).font  = { bold:true, size:14, color:WHITE };
+      titleRow.getCell(1).fill  = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF111827' } };
+      titleRow.getCell(1).alignment = { horizontal:'center', vertical:'middle' };
+      titleRow.height = 28;
+
+      // Рядок 2: порожній
+      ws.addRow([]);
+
+      // Рядок 3: заголовки колонок
+      const hdrRow = ws.addRow(cols);
+      hdrRow.height = 36;
+      hdrRow.eachCell(cell => {
+        cell.font = { bold:true, color:WHITE, size:11 };
+        cell.fill = HDR_FILL;
+        cell.border = border;
+        cell.alignment = { horizontal:'center', vertical:'middle', wrapText:true };
+      });
+      hdrRow.getCell(1).alignment = { horizontal:'left', vertical:'middle' };
+
+      // Дані
+      const rows = isBarman ? barmenT : waitersT;
+      for (const t of rows) {
+        const vals = isBarman
+          ? [t.name, money2(t.revenue), money2(t.upsell), money2(t.tea_coffee), money2(t.cocktails_b), money2(t.lemonades), money2(t.monthly_total)]
+          : [t.name, money2(t.revenue), money2(t.upsell), money2(t.desserts), money2(t.wines), money2(t.cocktails_w), money2(t.monthly_total)];
+        const row = ws.addRow(vals);
+        row.height = 22;
+        row.getCell(1).font = { bold:true, color:WHITE };
+        row.getCell(1).fill = isBarman ? BAR_FILL : WAIT_FILL;
+        for (let i = 2; i <= 6; i++) {
+          row.getCell(i).numFmt = '#,##0.00 ₴';
+          row.getCell(i).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF1F2937' } };
+          row.getCell(i).font = { color:{ argb:'FFD1D5DB' } };
+        }
+        row.getCell(7).numFmt = '#,##0.00 ₴';
+        row.getCell(7).font  = { bold:true, color:GREEN };
+        row.getCell(7).fill  = TOT_FILL;
+        row.eachCell(cell => { cell.border = border; cell.alignment = { vertical:'middle', horizontal: cell === row.getCell(1) ? 'left' : 'right' }; });
+      }
+
+      // Спільні зміни (тільки для барменів)
+      if (isBarman) {
+        let hasShared = false;
+        for (const [uid, info] of userInfo.entries()) {
+          if (!info.name.includes("/") || !info.isBarman) continue;
+          if (!hasShared) {
+            const sepRow = ws.addRow(['']);
+            ws.mergeCells(`A${sepRow.number}:G${sepRow.number}`);
+            hasShared = true;
+          }
+          const entries = [...dayMap.entries()].filter(([k])=>k.startsWith(uid+"_")).map(([,v])=>v);
+          const s = sumEntries(entries);
+          const row = ws.addRow([`${info.name} (спільна)`, money2(s.revenue), money2(s.upsell), money2(s.tea_coffee), money2(s.cocktails_b), money2(s.lemonades), money2(s.total)]);
+          row.height = 22;
+          row.getCell(1).font = { bold:true, color:ORANGE };
+          row.getCell(1).fill = SHAR_FILL;
+          for (let i = 2; i <= 6; i++) {
+            row.getCell(i).numFmt = '#,##0.00 ₴';
+            row.getCell(i).fill = SHAR_FILL;
+            row.getCell(i).font = { color:{ argb:'FFD1D5DB' } };
+          }
+          row.getCell(7).numFmt = '#,##0.00 ₴';
+          row.getCell(7).font  = { bold:true, color:ORANGE };
+          row.getCell(7).fill  = SHAR_FILL;
+          row.eachCell(cell => { cell.border = border; cell.alignment = { vertical:'middle', horizontal: cell === row.getCell(1) ? 'left' : 'right' }; });
+        }
+      }
+
+      // Ширини колонок
+      ws.columns = [
+        { width:28 }, { width:18 }, { width:20 }, { width:18 }, { width:20 }, { width:22 }, { width:18 }
+      ];
+      return ws;
+    };
+
+    makeSheet('Бармени', true);
+    makeSheet('Офіціанти', false);
+
+    const filename = `GRECO_bonuses_${m}.${y}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch(e) {
+    console.error("Excel export error:", e);
+    res.status(500).send("Помилка: " + e.message);
+  }
+});
 
 const port = process.env.PORT || 3001;
 app.listen(port, () => {
