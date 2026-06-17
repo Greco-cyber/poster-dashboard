@@ -1505,6 +1505,22 @@ h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
   <td class="std std-total">${f2n(t.monthly_total)} ₴</td>
 </tr>`;
           }
+          // Спільні зміни (BAR СЕРГІЙ/МАРК) — показуємо окремим рядком
+          const { userInfo, dayMap } = cached.data;
+          for (const [uid, info] of userInfo.entries()) {
+            if (!info.name.includes("/") || !info.isBarman) continue;
+            const entries = [...dayMap.entries()].filter(([k])=>k.startsWith(uid+"_")).map(([,v])=>v);
+            const s = sumEntries(entries);
+            bodyHtml += `<tr style="opacity:0.75;border-top:2px dashed #374151">
+  <td class="std-name" style="color:#f59e0b">${info.name} <span style="font-size:11px;color:#6b7280">(спільна)</span></td>
+  <td class="std">${f2n(s.revenue)} ₴</td>
+  <td class="std">${f2n(s.upsell)} ₴</td>
+  <td class="std">${f2n(s.tea_coffee)} ₴</td>
+  <td class="std">${f2n(s.cocktails_b)} ₴</td>
+  <td class="std">${f2n(s.lemonades)} ₴</td>
+  <td class="std std-total">${f2n(s.total)} ₴</td>
+</tr>`;
+          }
           bodyHtml += `</tbody></table></div>`;
         }
 
