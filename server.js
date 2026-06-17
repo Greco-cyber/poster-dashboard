@@ -1798,9 +1798,45 @@ app.get("/monthly-bonus/export", async (req, res) => {
     let { month } = req.query;
     if (!month) month = todayStr.slice(0,6);
 
-    const cached = MONTHLY_CACHE.get(month);
+    const now2 = Date.now();
+    let cached = MONTHLY_CACHE.get(month);
+
+    // Якщо не рахується — запускаємо
+    if (!cached || cached.status === 'error') {
+      MONTHLY_CACHE.set(month, { status: 'computing', startedAt: now2 });
+      computeMonthlyBonus(month).then(data => {
+        MONTHLY_CACHE.set(month, { status: 'done', data, computedAt: Date.now() });
+      }).catch(e => {
+        MONTHLY_CACHE.set(month, { status: 'error', error: String(e) });
+      });
+      cached = MONTHLY_CACHE.get(month);
+    }
+
+    // Якщо ще рахується — показуємо сторінку очікування
     if (!cached || cached.status !== 'done') {
-      return res.status(202).send("Дані ще обчислюються. Зачекайте та спробуйте знову.");
+      const elapsed = cached ? Math.round((now2 - cached.startedAt) / 1000) : 0;
+      const y2 = month.slice(0,4), m2 = month.slice(4,6);
+      return res.send(`<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
+<meta http-equiv="refresh" content="20">
+<title>Підготовка файлу...</title>
+<style>
+body{font-family:-apple-system,sans-serif;background:#111827;color:#e5e7eb;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+.card{background:#1f2937;border:1px solid #374151;border-radius:16px;padding:36px;max-width:420px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+h2{color:#fff;font-size:20px;margin:16px 0 8px}
+p{color:#9ca3af;font-size:14px;margin:6px 0;line-height:1.5}
+.spinner{width:48px;height:48px;border:4px solid #374151;border-top-color:#059669;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+.elapsed{color:#6b7280;font-size:12px;margin-top:12px}
+.back{display:inline-block;margin-top:20px;padding:8px 18px;background:#374151;border-radius:8px;color:#e5e7eb;text-decoration:none;font-size:13px}
+</style></head>
+<body><div class="card">
+<div class="spinner"></div>
+<h2>Підготовка Excel файлу</h2>
+<p>Обробляємо транзакції за <b>${m2}.${y2}</b></p>
+<p>Сторінка оновиться автоматично, після чого файл завантажиться</p>
+<p class="elapsed">Пройшло: ${elapsed} сек • оновлення через 20 сек</p>
+<a class="back" href="/monthly-bonus">← Назад</a>
+</div></body></html>`);
     }
 
     const totals = buildMonthlyTotals(cached.data);
