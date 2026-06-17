@@ -1551,6 +1551,7 @@ h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
             const s = sumEntries(entries);
             bodyHtml += `<tr style="opacity:0.75;border-top:2px dashed #374151">
   <td class="std-name" style="color:#f59e0b">${info.name} <span style="font-size:11px;color:#6b7280">(спільна)</span></td>
+  <td class="std" style="color:#93c5fd;font-weight:600">${entries.length}</td>
   <td class="std">${f2n(s.revenue)} ₴</td>
   <td class="std">${f2n(s.upsell)} ₴</td>
   <td class="std">${f2n(s.tea_coffee)} ₴</td>
@@ -1931,19 +1932,22 @@ p{color:#9ca3af;font-size:14px;margin:6px 0;line-height:1.5}
           }
           const entries = [...dayMap.entries()].filter(([k])=>k.startsWith(uid+"_")).map(([,v])=>v);
           const s = sumEntries(entries);
-          const row = ws.addRow([`${info.name} (спільна)`, money2(s.revenue), money2(s.upsell), money2(s.tea_coffee), money2(s.cocktails_b), money2(s.lemonades), money2(s.total)]);
+          const row = ws.addRow([`${info.name} (спільна)`, entries.length, money2(s.revenue), money2(s.upsell), money2(s.tea_coffee), money2(s.cocktails_b), money2(s.lemonades), money2(s.total)]);
           row.height = 22;
           row.getCell(1).font = { bold:true, color:ORANGE };
           row.getCell(1).fill = SHAR_FILL;
-          for (let i = 2; i <= 6; i++) {
+          row.getCell(2).font = { bold:true, color:{ argb:'FF93C5FD' } };
+          row.getCell(2).fill = SHAR_FILL;
+          row.getCell(2).alignment = { vertical:'middle', horizontal:'center' };
+          for (let i = 3; i <= 7; i++) {
             row.getCell(i).numFmt = '#,##0.00 ₴';
             row.getCell(i).fill = SHAR_FILL;
             row.getCell(i).font = { color:{ argb:'FFD1D5DB' } };
           }
-          row.getCell(7).numFmt = '#,##0.00 ₴';
-          row.getCell(7).font  = { bold:true, color:ORANGE };
-          row.getCell(7).fill  = SHAR_FILL;
-          row.eachCell(cell => { cell.border = border; cell.alignment = { vertical:'middle', horizontal: cell === row.getCell(1) ? 'left' : 'right' }; });
+          row.getCell(8).numFmt = '#,##0.00 ₴';
+          row.getCell(8).font  = { bold:true, color:ORANGE };
+          row.getCell(8).fill  = SHAR_FILL;
+          row.eachCell(cell => { cell.border = border; cell.alignment = cell.alignment || { vertical:'middle', horizontal: cell === row.getCell(1) ? 'left' : 'right' }; });
         }
       }
 
