@@ -1523,6 +1523,7 @@ h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
 <div style="overflow-x:auto"><table class="sum-table">
 <thead><tr>
   <th class="sth-name">Ім'я</th>
+  <th class="sth">Змін</th>
   <th class="sth">Виторг<br><span class="pct">1.3%</span></th>
   <th class="sth">Соуси + допи<br><span class="pct">7%</span></th>
   <th class="sth">Чай / Кава<br><span class="pct">7%</span></th>
@@ -1533,6 +1534,7 @@ h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
           for (const t of barmenT) {
             bodyHtml += `<tr>
   <td class="std-name">${t.name}</td>
+  <td class="std" style="color:#93c5fd;font-weight:600">${t.shifts}</td>
   <td class="std">${f2n(t.revenue)} ₴</td>
   <td class="std">${f2n(t.upsell)} ₴</td>
   <td class="std">${f2n(t.tea_coffee)} ₴</td>
@@ -1566,6 +1568,7 @@ h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
 <div style="overflow-x:auto"><table class="sum-table">
 <thead><tr>
   <th class="sth-name">Ім'я</th>
+  <th class="sth">Змін</th>
   <th class="sth">Виторг<br><span class="pct">0.75%</span></th>
   <th class="sth">Соуси + доп<br><span class="pct">10%</span></th>
   <th class="sth">Десерти<br><span class="pct">5%</span></th>
@@ -1576,6 +1579,7 @@ h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
           for (const t of waitersT) {
             bodyHtml += `<tr>
   <td class="std-name">${t.name}</td>
+  <td class="std" style="color:#93c5fd;font-weight:600">${t.shifts}</td>
   <td class="std">${f2n(t.revenue)} ₴</td>
   <td class="std">${f2n(t.upsell)} ₴</td>
   <td class="std">${f2n(t.desserts)} ₴</td>
@@ -1739,7 +1743,8 @@ function buildMonthlyTotals(data) {
   for (const [uid, info] of userInfo.entries()) {
     const entries = [...dayMap.entries()].filter(([k]) => k.startsWith(uid + "_")).map(([,v]) => v);
     const sums = sumEntries(entries);
-    rawTotals.set(uid, { name: info.name, isBarman: info.isBarman, ...sums });
+    const shifts = entries.length; // кількість змін = унікальних днів
+    rawTotals.set(uid, { name: info.name, isBarman: info.isBarman, shifts, ...sums });
   }
 
   const FIELDS = ['revenue','upsell','desserts','wines','cocktails_w','tea_coffee','cocktails_b','lemonades'];
@@ -1775,6 +1780,7 @@ function buildMonthlyTotals(data) {
     if (data.name.includes("/")) continue;
     result.push({
       user_id: uid, name: data.name, isBarman: data.isBarman,
+      shifts: data.shifts || 0,
       revenue: r2(data.revenue), upsell: r2(data.upsell),
       desserts: r2(data.desserts), wines: r2(data.wines), cocktails_w: r2(data.cocktails_w),
       tea_coffee: r2(data.tea_coffee), cocktails_b: r2(data.cocktails_b), lemonades: r2(data.lemonades),
@@ -1827,12 +1833,12 @@ app.get("/monthly-bonus/export", async (req, res) => {
     const makeSheet = (name, isBarman) => {
       const ws = wb.addWorksheet(name);
       const cols = isBarman
-        ? ['Ім\'я','Виторг (1.3%)','Соуси + допи (7%)','Чай / Кава (7%)','Алк. коктейлі (15%)','Лимонади + Мохіто (10%)','Загальна']
-        : ['Ім\'я','Виторг (0.75%)','Соуси + доп (10%)','Десерти (5%)','Вино (5%)','Алк. коктейлі (5%)','Загальна'];
+        ? ['Ім\'я','Змін','Виторг (1.3%)','Соуси + допи (7%)','Чай / Кава (7%)','Алк. коктейлі (15%)','Лимонади + Мохіто (10%)','Загальна']
+        : ['Ім\'я','Змін','Виторг (0.75%)','Соуси + доп (10%)','Десерти (5%)','Вино (5%)','Алк. коктейлі (5%)','Загальна'];
 
       // Рядок 1: заголовок
       const titleRow = ws.addRow([`${isBarman?'🍸 Бармени':'🧾 Офіціанти'} — Бонуси за ${periodLabel}`]);
-      ws.mergeCells(`A1:G1`);
+      ws.mergeCells(`A1:H1`);
       titleRow.getCell(1).font  = { bold:true, size:14, color:WHITE };
       titleRow.getCell(1).fill  = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF111827' } };
       titleRow.getCell(1).alignment = { horizontal:'center', vertical:'middle' };
@@ -1856,21 +1862,25 @@ app.get("/monthly-bonus/export", async (req, res) => {
       const rows = isBarman ? barmenT : waitersT;
       for (const t of rows) {
         const vals = isBarman
-          ? [t.name, money2(t.revenue), money2(t.upsell), money2(t.tea_coffee), money2(t.cocktails_b), money2(t.lemonades), money2(t.monthly_total)]
-          : [t.name, money2(t.revenue), money2(t.upsell), money2(t.desserts), money2(t.wines), money2(t.cocktails_w), money2(t.monthly_total)];
+          ? [t.name, t.shifts||0, money2(t.revenue), money2(t.upsell), money2(t.tea_coffee), money2(t.cocktails_b), money2(t.lemonades), money2(t.monthly_total)]
+          : [t.name, t.shifts||0, money2(t.revenue), money2(t.upsell), money2(t.desserts), money2(t.wines), money2(t.cocktails_w), money2(t.monthly_total)];
         const row = ws.addRow(vals);
         row.height = 22;
         row.getCell(1).font = { bold:true, color:WHITE };
         row.getCell(1).fill = isBarman ? BAR_FILL : WAIT_FILL;
-        for (let i = 2; i <= 6; i++) {
+        // Колонка "Змін"
+        row.getCell(2).font = { bold:true, color:{ argb:'FF93C5FD' } };
+        row.getCell(2).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF1F2937' } };
+        row.getCell(2).alignment = { vertical:'middle', horizontal:'center' };
+        for (let i = 3; i <= 7; i++) {
           row.getCell(i).numFmt = '#,##0.00 ₴';
           row.getCell(i).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF1F2937' } };
           row.getCell(i).font = { color:{ argb:'FFD1D5DB' } };
         }
-        row.getCell(7).numFmt = '#,##0.00 ₴';
-        row.getCell(7).font  = { bold:true, color:GREEN };
-        row.getCell(7).fill  = TOT_FILL;
-        row.eachCell(cell => { cell.border = border; cell.alignment = { vertical:'middle', horizontal: cell === row.getCell(1) ? 'left' : 'right' }; });
+        row.getCell(8).numFmt = '#,##0.00 ₴';
+        row.getCell(8).font  = { bold:true, color:GREEN };
+        row.getCell(8).fill  = TOT_FILL;
+        row.eachCell(cell => { cell.border = border; cell.alignment = cell.alignment || { vertical:'middle', horizontal: cell === row.getCell(1) ? 'left' : 'right' }; });
       }
 
       // Спільні зміни (тільки для барменів)
@@ -1903,7 +1913,7 @@ app.get("/monthly-bonus/export", async (req, res) => {
 
       // Ширини колонок
       ws.columns = [
-        { width:28 }, { width:18 }, { width:20 }, { width:18 }, { width:20 }, { width:22 }, { width:18 }
+        { width:28 }, { width:8 }, { width:18 }, { width:20 }, { width:18 }, { width:20 }, { width:22 }, { width:18 }
       ];
       return ws;
     };
