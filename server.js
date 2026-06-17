@@ -1323,7 +1323,11 @@ async function computeMonthlyBonus(month) {
   const getKey = (uid, d) => `${uid}_${d}`;
   const getEntry = (uid, d) => {
     const k = getKey(uid, d);
-    if (!dayMap.has(k)) dayMap.set(k, { upsell:0, cats:0, revenue:0 });
+    if (!dayMap.has(k)) dayMap.set(k, {
+      revenue:0, upsell:0,
+      desserts:0, wines:0, cocktails_w:0,   // офіціанти
+      tea_coffee:0, cocktails_b:0, lemonades:0  // бармени (за зміну)
+    });
     return dayMap.get(k);
   };
 
@@ -1354,9 +1358,9 @@ async function computeMonthlyBonus(month) {
           const payed = Number(p.payed_sum||0);
           if (catId===17||catId===37||catId===41) { if (payed/100>0) e.upsell += (payed/100)*upsellPct; continue; }
           if (!txIsBar) {
-            if (DESSERT_CATS.has(catId)) { e.cats += (payed/100)*0.05; continue; }
-            if (WINE_CATS.has(catId))    { e.cats += (payed/100)*0.05; continue; }
-            if (COCKTAIL_CAT.has(catId)) { e.cats += (payed/100)*0.05; continue; }
+            if (DESSERT_CATS.has(catId)) { e.desserts    += (payed/100)*0.05; continue; }
+            if (WINE_CATS.has(catId))    { e.wines        += (payed/100)*0.05; continue; }
+            if (COCKTAIL_CAT.has(catId)) { e.cocktails_w  += (payed/100)*0.05; continue; }
           }
           if (modId!=="0") {
             if (payed===0||payed%100!==0) continue;
@@ -1397,11 +1401,16 @@ async function computeMonthlyBonus(month) {
       const teaCoffee = catRev.get(28)||0;
       const cocktails = catRev.get(34)||0;
       const lemonades = [48,49,50].reduce((s,id)=>s+(catRev.get(id)||0),0);
-      const totalShared = teaCoffee*0.07 + cocktails*0.15 + lemonades*0.10;
+      const tcBonus = teaCoffee*0.07, coBonus = cocktails*0.15, leBonus = lemonades*0.10;
       const cnt = Math.max(barmenCountPerDay.get(d)||1, 1);
       for (const uid of barmenUids) {
         const worked = closedTx.some(tx => String(tx.user_id)===uid && String(tx.date_close_date||tx.date_close||"").slice(0,10).replace(/-/g,"")=== d);
-        if (worked) getEntry(uid, d).cats += totalShared/cnt;
+        if (worked) {
+          const e = getEntry(uid, d);
+          e.tea_coffee  += tcBonus/cnt;
+          e.cocktails_b += coBonus/cnt;
+          e.lemonades   += leBonus/cnt;
+        }
       }
     } catch(e) { /* skip */ }
   }
@@ -1463,49 +1472,69 @@ h2{color:#fff;margin-bottom:12px}p{color:#9ca3af;font-size:14px;margin:6px 0}
 </body></html>`);
       } else if (cached.status === 'done' && now - cached.computedAt < MONTHLY_TTL_MS) {
         // Рендеримо з кешу
-        const { userInfo, dayMap } = cached.data;
+        const totals = buildMonthlyTotals(cached.data);
+        const waitersT = totals.filter(t=>!t.isBarman).sort((a,b)=>b.monthly_total-a.monthly_total);
+        const barmenT  = totals.filter(t=> t.isBarman).sort((a,b)=>b.monthly_total-a.monthly_total);
 
-        // Збираємо спільні зміни (з "/") щоб додати їх частку до індивідуальних
-        const sharedEntries = new Map(); // uid -> [{date, revenue, upsell, cats, share}]
-        for (const [uid, info] of userInfo.entries()) {
-          if (!info.name.includes("/")) continue;
-          const parts = info.name.split("/").map(s => s.trim()).filter(Boolean);
-          const share = 1 / parts.length;
-          const entries = [...dayMap.entries()].filter(([k])=>k.startsWith(uid+"_")).map(([k,v])=>({ date: k.slice(uid.length+1), ...v, share }));
-          for (const part of parts) {
-            // Беремо останнє слово — особисте ім'я (напр. "BAR СЕРГІЙ" → "СЕРГІЙ")
-            const personalName = part.split(/\s+/).pop().toUpperCase();
-            const matchUid = [...userInfo.entries()].find(([,v])=>!v.name.includes("/")&&v.isBarman&&v.name.toUpperCase().includes(personalName))?.[0];
-            const key = matchUid || `split_${part}`;
-            if (!sharedEntries.has(key)) sharedEntries.set(key, []);
-            sharedEntries.get(key).push(...entries);
+        const f2n = v => Number(v||0).toLocaleString("uk-UA",{minimumFractionDigits:2,maximumFractionDigits:2});
+        const periodLabel = `${cached.data.dateFrom.slice(6,8)}.${cached.data.dateFrom.slice(4,6)} – ${cached.data.dateTo.slice(6,8)}.${cached.data.dateTo.slice(4,6)}`;
+
+        // ---- Зведена таблиця барменів ----
+        let bodyHtml = `<div class="summary-period">Період: ${periodLabel}</div>`;
+
+        if (barmenT.length) {
+          bodyHtml += `<h2 class="sec-title">🍸 Бармени</h2>
+<div style="overflow-x:auto"><table class="sum-table">
+<thead><tr>
+  <th class="sth-name">Ім'я</th>
+  <th class="sth">Виторг<br><span class="pct">1.3%</span></th>
+  <th class="sth">Соуси + допи<br><span class="pct">7%</span></th>
+  <th class="sth">Чай / Кава<br><span class="pct">7%</span></th>
+  <th class="sth">Алк. коктейлі<br><span class="pct">15%</span></th>
+  <th class="sth">Лимонади+Мохіто<br><span class="pct">10%</span></th>
+  <th class="sth sth-total">Загальна</th>
+</tr></thead><tbody>`;
+          for (const t of barmenT) {
+            bodyHtml += `<tr>
+  <td class="std-name">${t.name}</td>
+  <td class="std">${f2n(t.revenue)} ₴</td>
+  <td class="std">${f2n(t.upsell)} ₴</td>
+  <td class="std">${f2n(t.tea_coffee)} ₴</td>
+  <td class="std">${f2n(t.cocktails_b)} ₴</td>
+  <td class="std">${f2n(t.lemonades)} ₴</td>
+  <td class="std std-total">${f2n(t.monthly_total)} ₴</td>
+</tr>`;
           }
+          bodyHtml += `</tbody></table></div>`;
         }
 
-        let bodyHtml = "";
-        const users = [...userInfo.entries()].filter(([,v])=>!v.name.includes("/")).sort((a,b)=>a[1].name.localeCompare(b[1].name));
-        for (const [uid, info] of users) {
-          const ownEntries = [...dayMap.entries()].filter(([k])=>k.startsWith(uid+"_")).map(([k,v])=>({ date: k.slice(uid.length+1), label: k.slice(uid.length+1), own: true, ...v })).sort((a,b)=>a.date.localeCompare(b.date));
-          const splitEntries = (sharedEntries.get(uid)||[]).map(e=>({ ...e, label: e.date, own: false })).sort((a,b)=>a.date.localeCompare(b.date));
-          const allEntries = [...ownEntries, ...splitEntries].sort((a,b)=>a.date.localeCompare(b.date));
-          if (!allEntries.length) continue;
-          const monthTotal = allEntries.reduce((s,e)=>s+(e.own?(e.revenue+e.upsell+e.cats):(e.revenue+e.upsell+e.cats)*e.share), 0);
-          const roleColor = info.isBarman ? "#a78bfa" : "#60a5fa";
-          bodyHtml += `<div class="person-block"><div class="person-header">
-            <span class="person-name">${info.name}</span>
-            <span class="role-badge" style="background:${roleColor}22;color:${roleColor};border:1px solid ${roleColor}55">${info.isBarman?"Бармен":"Офіціант"}</span>
-            <span class="month-total">За місяць: <b>${f2(monthTotal)} ₴</b></span>
-          </div><table class="day-table"><thead><tr>
-            <th>Дата</th><th class="tr">Виторг %</th><th class="tr">Апсейл</th><th class="tr">Кат. бонус</th><th class="tr">Разом</th>
-          </tr></thead><tbody>`;
-          for (const e of allEntries) {
-            const mul = e.own ? 1 : (e.share||0.5);
-            const dayTotal = (e.revenue+e.upsell+e.cats)*mul;
-            const mark = e.own ? "" : ' <span style="color:#f59e0b;font-size:10px">½ спільна</span>';
-            bodyHtml += `<tr${e.own?"":" style=\"opacity:0.8\""}><td>${fmtDisp(e.date)}${mark}</td><td class="tr">${f2(e.revenue*mul)} ₴</td><td class="tr">${f2(e.upsell*mul)} ₴</td><td class="tr">${f2(e.cats*mul)} ₴</td><td class="tr total-day">${f2(dayTotal)} ₴</td></tr>`;
+        // ---- Зведена таблиця офіціантів ----
+        if (waitersT.length) {
+          bodyHtml += `<h2 class="sec-title" style="margin-top:28px">🧾 Офіціанти</h2>
+<div style="overflow-x:auto"><table class="sum-table">
+<thead><tr>
+  <th class="sth-name">Ім'я</th>
+  <th class="sth">Виторг<br><span class="pct">0.75%</span></th>
+  <th class="sth">Соуси + доп<br><span class="pct">10%</span></th>
+  <th class="sth">Десерти<br><span class="pct">5%</span></th>
+  <th class="sth">Вино<br><span class="pct">5%</span></th>
+  <th class="sth">Алк. коктейлі<br><span class="pct">5%</span></th>
+  <th class="sth sth-total">Загальна</th>
+</tr></thead><tbody>`;
+          for (const t of waitersT) {
+            bodyHtml += `<tr>
+  <td class="std-name">${t.name}</td>
+  <td class="std">${f2n(t.revenue)} ₴</td>
+  <td class="std">${f2n(t.upsell)} ₴</td>
+  <td class="std">${f2n(t.desserts)} ₴</td>
+  <td class="std">${f2n(t.wines)} ₴</td>
+  <td class="std">${f2n(t.cocktails_w)} ₴</td>
+  <td class="std std-total">${f2n(t.monthly_total)} ₴</td>
+</tr>`;
           }
-          bodyHtml += `</tbody><tfoot><tr><td colspan="4" class="tr tfoot-label">Разом за ${monthLabel}:</td><td class="tr tfoot-val">${f2(monthTotal)} ₴</td></tr></tfoot></table></div>`;
+          bodyHtml += `</tbody></table></div>`;
         }
+
         return res.send(renderMonthlyPage(toolbar, bodyHtml || '<div class="empty">Немає даних</div>', monthLabel));
       }
     }
@@ -1570,6 +1599,17 @@ tfoot tr{background:#111827;border-top:2px solid #374151}
 .tfoot-label{color:#9ca3af;font-size:12px;padding:10px 12px}
 .tfoot-val{color:#34d399;font-weight:700;font-size:14px;padding:10px 12px}
 .empty{text-align:center;color:#6b7280;padding:40px;font-size:14px}
+.sec-title{font-size:15px;font-weight:700;color:#93c5fd;border-bottom:1px solid #374151;padding-bottom:6px;margin:16px 0 12px}
+.summary-period{font-size:13px;color:#9ca3af;margin-bottom:14px;padding:8px 12px;background:#1f2937;border-radius:8px;border:1px solid #374151;display:inline-block}
+.sum-table{width:100%;border-collapse:collapse;font-size:13px;background:#1f2937;border-radius:12px;overflow:hidden;border:1px solid #374151}
+.sth-name{text-align:left;padding:10px 14px;color:#9ca3af;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;background:#111827;white-space:nowrap}
+.sth{text-align:right;padding:10px 12px;color:#9ca3af;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;background:#111827;white-space:nowrap}
+.sth-total{color:#fcd34d}
+.pct{color:#6b7280;font-size:10px;font-weight:400;text-transform:none;letter-spacing:0}
+.std-name{padding:10px 14px;font-size:14px;font-weight:600;color:#fff;border-top:1px solid #374151;white-space:nowrap}
+.std{text-align:right;padding:10px 12px;font-size:13px;color:#d1d5db;border-top:1px solid #374151;white-space:nowrap}
+.std-total{font-weight:700;color:#34d399;font-size:14px}
+.sum-table tbody tr:hover td{background:rgba(255,255,255,.04)}
 </style></head><body>
 <h1>📊 Бонуси за місяць ${monthLabel}</h1>
 ${toolbar}
@@ -1613,6 +1653,28 @@ app.get("/api/monthly-totals", async (req, res) => {
   }
 });
 
+function sumEntries(entries) {
+  const z = { revenue:0, upsell:0, desserts:0, wines:0, cocktails_w:0, tea_coffee:0, cocktails_b:0, lemonades:0 };
+  for (const e of entries) {
+    z.revenue     += e.revenue||0;
+    z.upsell      += e.upsell||0;
+    z.desserts    += e.desserts||0;
+    z.wines       += e.wines||0;
+    z.cocktails_w += e.cocktails_w||0;
+    z.tea_coffee  += e.tea_coffee||0;
+    z.cocktails_b += e.cocktails_b||0;
+    z.lemonades   += e.lemonades||0;
+  }
+  const r2 = v => Math.round((v||0)*100)/100;
+  return {
+    revenue:     r2(z.revenue),     upsell:      r2(z.upsell),
+    desserts:    r2(z.desserts),    wines:        r2(z.wines),
+    cocktails_w: r2(z.cocktails_w), tea_coffee:   r2(z.tea_coffee),
+    cocktails_b: r2(z.cocktails_b), lemonades:    r2(z.lemonades),
+    total: r2(z.revenue+z.upsell+z.desserts+z.wines+z.cocktails_w+z.tea_coffee+z.cocktails_b+z.lemonades),
+  };
+}
+
 function buildMonthlyTotals(data) {
   const { userInfo, dayMap } = data;
 
@@ -1620,39 +1682,48 @@ function buildMonthlyTotals(data) {
   const rawTotals = new Map();
   for (const [uid, info] of userInfo.entries()) {
     const entries = [...dayMap.entries()].filter(([k]) => k.startsWith(uid + "_")).map(([,v]) => v);
-    const total = entries.reduce((s, e) => s + e.revenue + e.upsell + e.cats, 0);
-    rawTotals.set(uid, { name: info.name, isBarman: info.isBarman, total });
+    const sums = sumEntries(entries);
+    rawTotals.set(uid, { name: info.name, isBarman: info.isBarman, ...sums });
   }
 
+  const FIELDS = ['revenue','upsell','desserts','wines','cocktails_w','tea_coffee','cocktails_b','lemonades'];
+  const r2 = v => Math.round((v||0)*100)/100;
+
   // 2. Знаходимо спільні профілі (ім'я містить "/"), напр. "BAR СЕРГІЙ/МАРК"
-  for (const [sharedUid, sharedData] of rawTotals.entries()) {
+  for (const [, sharedData] of rawTotals.entries()) {
     if (!sharedData.name.includes("/")) continue;
     const parts = sharedData.name.split("/").map(s => s.trim()).filter(Boolean);
-    const perShare = sharedData.total / parts.length;
+    const share = 1 / parts.length;
 
     for (const part of parts) {
-      // Беремо останнє слово — особисте ім'я (напр. "BAR СЕРГІЙ" → "СЕРГІЙ", "МАРК" → "МАРК")
       const personalName = part.split(/\s+/).pop().toUpperCase();
       let matched = null;
       for (const [uid, d] of rawTotals.entries()) {
-        if (d.name.includes("/")) continue;
-        if (!d.isBarman) continue; // тільки бармени, офіціантів не чіпаємо
+        if (d.name.includes("/") || !d.isBarman) continue;
         if (d.name.toUpperCase().includes(personalName)) { matched = uid; break; }
       }
-      if (matched) {
-        rawTotals.get(matched).total += perShare;
-      } else {
-        // Бармен цього місяця працював тільки у спільних змінах
-        rawTotals.set(`split_${personalName}`, { name: personalName, isBarman: true, total: perShare });
-      }
+      const target = matched
+        ? rawTotals.get(matched)
+        : (() => {
+            const n = { name: personalName, isBarman: true, revenue:0, upsell:0, desserts:0, wines:0, cocktails_w:0, tea_coffee:0, cocktails_b:0, lemonades:0, total:0 };
+            rawTotals.set(`split_${personalName}`, n); return n;
+          })();
+      for (const f of FIELDS) target[f] = r2((target[f]||0) + (sharedData[f]||0)*share);
+      target.total = r2(FIELDS.reduce((s,f)=>s+(target[f]||0),0));
     }
   }
 
-  // 3. Повертаємо тільки індивідуальні профілі (без "/"")
+  // 3. Повертаємо тільки індивідуальні профілі (без "/")
   const result = [];
   for (const [uid, data] of rawTotals.entries()) {
     if (data.name.includes("/")) continue;
-    result.push({ user_id: uid, name: data.name, monthly_total: Math.round(data.total * 100) / 100 });
+    result.push({
+      user_id: uid, name: data.name, isBarman: data.isBarman,
+      revenue: r2(data.revenue), upsell: r2(data.upsell),
+      desserts: r2(data.desserts), wines: r2(data.wines), cocktails_w: r2(data.cocktails_w),
+      tea_coffee: r2(data.tea_coffee), cocktails_b: r2(data.cocktails_b), lemonades: r2(data.lemonades),
+      monthly_total: r2(data.total),
+    });
   }
   return result;
 }
