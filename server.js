@@ -1424,10 +1424,9 @@ app.get("/monthly-bonus", async (req, res) => {
     if (!TOKEN) return res.status(500).send("No token");
 
     const todayStr = todayYYYYMMDD();
-    let { month } = req.query;
+    let { month, action } = req.query;
     if (!month) month = todayStr.slice(0, 6);
 
-    const fmtDisp = (yyyymmdd) => `${yyyymmdd.slice(6,8)}.${yyyymmdd.slice(4,6)}`;
     const f2 = (n) => Number(n).toFixed(2);
 
     // Місяці для дропдауну
@@ -1443,7 +1442,43 @@ app.get("/monthly-bonus", async (req, res) => {
       const ly=mm.slice(0,4), lm=mm.slice(4,6);
       return `<option value="${mm}" ${mm===month?"selected":""}>${lm}.${ly}</option>`;
     }).join("");
-    const toolbar = `<div class="toolbar"><label>Місяць:</label><select id="sel">${monthOptions}</select><button onclick="go()">Показати</button><button class="btn-xl" onclick="dl()">⬇ Завантажити Excel</button></div>`;
+    const toolbar = `<div class="toolbar"><button onclick="window.location.href='/monthly-bonus'" style="background:#374151;border-color:#374151">← Назад</button><label>Місяць:</label><select id="sel">${monthOptions}</select><button onclick="go()">👁 Показати</button><button class="btn-xl" onclick="dl()">⬇ Завантажити Excel</button></div>`;
+
+    // Якщо action не вказано — показуємо стартовий екран з вибором
+    if (!action) {
+      return res.send(`<!DOCTYPE html><html lang="uk"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Бонуси за місяць — GRECO</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,sans-serif;background:#111827;color:#e5e7eb;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px}
+.card{background:#1f2937;border:1px solid #374151;border-radius:16px;padding:36px;width:100%;max-width:440px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+h1{color:#fff;font-size:22px;margin-bottom:6px}
+.sub{color:#9ca3af;font-size:13px;margin-bottom:28px}
+label{display:block;color:#9ca3af;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+select{width:100%;padding:10px 14px;background:#111827;border:1px solid #374151;border-radius:8px;color:#fff;font-size:15px;cursor:pointer;appearance:none}
+.btns{display:flex;gap:12px;margin-top:24px}
+.btn{flex:1;padding:13px;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn-show{background:#2563eb;color:#fff}
+.btn-xl{background:#059669;color:#fff}
+</style></head><body>
+<div class="card">
+  <h1>📊 Бонуси за місяць</h1>
+  <p class="sub">Оберіть місяць та дію</p>
+  <label>Місяць</label>
+  <select id="sel">${monthOptions}</select>
+  <div class="btns">
+    <button class="btn btn-show" onclick="go()">👁 Показати</button>
+    <button class="btn btn-xl" onclick="dl()">⬇ Завантажити Excel</button>
+  </div>
+</div>
+<script>
+function go(){ window.location.href='/monthly-bonus?month='+document.getElementById('sel').value+'&action=show'; }
+function dl(){ window.location.href='/monthly-bonus/export?month='+document.getElementById('sel').value; }
+</script>
+</body></html>`);
+    }
 
     // Перевіряємо кеш
     const now = Date.now();
@@ -1633,7 +1668,7 @@ tfoot tr{background:#111827;border-top:2px solid #374151}
 ${toolbar}
 ${bodyHtml}
 <script>
-function go(){window.location.href='/monthly-bonus?month='+document.getElementById('sel').value;}
+function go(){window.location.href='/monthly-bonus?month='+document.getElementById('sel').value+'&action=show';}
 function dl(){window.location.href='/monthly-bonus/export?month='+document.getElementById('sel').value;}
 </script>
 </body></html>`;
