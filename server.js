@@ -1254,6 +1254,19 @@ app.get("/api/barmen-bonus", async (req, res) => {
   }
 });
 
+// -------------------- DEBUG: сирий виклик будь-якого методу Poster API --------------------
+app.get("/api/debug-raw", async (req, res) => {
+  try {
+    if (!TOKEN) return res.status(500).json({ error: "POSTER_TOKEN is not set" });
+    const { method, ...params } = req.query;
+    if (!method) return res.status(400).json({ error: "Вкажіть ?method=dash.getTransactions&dateFrom=...&dateTo=..." });
+    const data = await poster(String(method), params);
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 // -------------------- DEBUG: продажі по категорії --------------------
 app.get("/api/debug-cat", async (req, res) => {
   try {
